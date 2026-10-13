@@ -1,0 +1,165 @@
+// Hint, Darling database schema.
+// Defines the PostgreSQL models used by the API: accounts, events, wishlists,
+// wishlist items, gift claims, and session records for cookie-based auth.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// The occasion an event celebrates.
+enum EventType {
+  WEDDING
+  ENGAGEMENT
+  BIRTHDAY
+  ANNIVERSARY
+  GRADUATION
+  BABY_SHOWER
+  HOUSEWARMING
+  FESTIVE
+  CHRISTMAS
+  OTHER
+}
+
+/// How discoverable a wishlist is to guests.
+enum PrivacyMode {
+  PUBLIC
+  LINK_ONLY
+  PRIVATE
+}
+
+/// Lifecycle of a gift claim.
+enum ClaimStatus {
+  CLAIMED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  events   Event[]
+  sessions Session[]
+  claims   GiftClaim[]
+
+  @@map("users")
+}
+
+/// A server-side session. The raw token lives only in the HTTP-only cookie;
+/// `tokenHash` stores its SHA-256 digest so a database leak reveals no
+/// usable session tokens.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  csrfHash  String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Event {
+  id          String    @id @default(cuid())
+  ownerId     String
+  name        String
+  type        EventType
+  eventDate   DateTime?
+  description String?
+  location    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  wishlist Wishlist?
+
+  @@index([ownerId])
+  @@map("events")
+}
+
+model Wishlist {
+  id           String       @id @default(cuid())
+  eventId      String       @unique
+  title        String
+  description  String?
+  shareToken   String       @unique
+  privacyMode  PrivacyMode  @default(LINK_ONLY)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  event Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  items WishlistItem[]
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id                 String   @id @default(cuid())
+  wishlistId         String
+  name               String
+  productUrl         String?
+  imageUrl           String?
+  price              Decimal? @db.Decimal(10, 2)
+  currency           String   @default("GBP") @db.VarChar(3)
+  description        String?
+  preferredColour    String?
+  preferredSize      String?
+  preferredVariation String?
+  quantity           Int      @default(1)
+  notes              String?
+  position           Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  wishlist Wishlist    @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  claims   GiftClaim[]
+
+  @@index([wishlistId])
+  @@map("wishlist_items")
+}
+
+/// A reservation of a gift. In this first version at most one claim may be
+/// active per item: the `gift_claims_one_active_per_item` partial unique index
+/// (created in a hand-written migration, since Prisma cannot express a partial
+/// index) enforces it at the database level in addition to the service-layer
+/// transaction.
+model GiftClaim {
+  id             String       @id @default(cuid())
+  wishlistItemId String
+  /// Present when a registered user claims the gift.
+  claimantUserId String?
+  /// Private name captured for guest claims; never exposed publicly.
+  claimantName   String?
+  /// SHA-256 digest of the claim management token, when one is issued.
+  claimTokenHash String?      @unique
+  /// Client-supplied key used to make an accidental double-submit idempotent.
+  idempotencyKey String?      @unique
+  status         ClaimStatus  @default(CLAIMED)
+  claimedAt      DateTime     @default(now())
+  cancelledAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  wishlistItem WishlistItem @relation(fields: [wishlistItemId], references: [id], onDelete: Cascade)
+  claimantUser User?        @relation(fields: [claimantUserId], references: [id], onDelete: SetNull)
+
+  @@index([wishlistItemId])
+  @@index([claimantUserId])
+  @@map("gift_claims")
+}
