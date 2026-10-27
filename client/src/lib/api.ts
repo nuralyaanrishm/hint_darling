@@ -53,33 +53,74 @@ function readCookie(name: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+async function fetchCsrfToken(): Promise<string | null> {
+  try {
+    const response = await fetch("/api/auth/csrf", {
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      return readCookie(CSRF_COOKIE);
+    }
+    const data = (await response.json()) as { csrfToken?: string };
+    return data.csrfToken ?? readCookie(CSRF_COOKIE);
+  } catch {
+    return readCookie(CSRF_COOKIE);
+  }
+}
+
+function isCsrfFailure(status: number, text: string): boolean {
+  if (status !== 403) {
+    return false;
+  }
+
+  try {
+    const body = JSON.parse(text) as { error?: { message?: string } };
+    return /csrf/i.test(body.error?.message ?? "");
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers(options.headers);
+  const isUnsafe = UNSAFE_METHODS.has(method);
 
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  if (UNSAFE_METHODS.has(method)) {
-    const csrfToken = readCookie(CSRF_COOKIE);
+  if (isUnsafe && !headers.has("X-CSRF-Token")) {
+    const csrfToken = readCookie(CSRF_COOKIE) ?? (await fetchCsrfToken());
     if (csrfToken) {
       headers.set("X-CSRF-Token", csrfToken);
     }
   }
 
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    method,
-    headers,
-    credentials: "same-origin",
-  });
+  const send = () =>
+    fetch(`/api${path}`, {
+      ...options,
+      method,
+      headers,
+      credentials: "same-origin",
+    });
+
+  let response = await send();
+  let text = response.status === 204 ? "" : await response.text();
+
+  if (isUnsafe && isCsrfFailure(response.status, text)) {
+    const refreshed = await fetchCsrfToken();
+    if (refreshed && refreshed !== headers.get("X-CSRF-Token")) {
+      headers.set("X-CSRF-Token", refreshed);
+      response = await send();
+      text = response.status === 204 ? "" : await response.text();
+    }
+  }
 
   if (response.status === 204) {
     return undefined as T;
   }
 
-  const text = await response.text();
   const data = text ? (JSON.parse(text) as unknown) : null;
 
   if (!response.ok) {

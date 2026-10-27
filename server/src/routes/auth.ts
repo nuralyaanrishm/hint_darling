@@ -90,7 +90,7 @@ authRouter.get("/csrf", (_req, res) => {
   res.json({ csrfToken: res.locals.csrfToken });
 });
 
-/** Sends the current signup code, cleaning it up if Mailgun rejects the mail. */
+/** Sends the current signup code, cleaning it up if Brevo rejects the mail. */
 async function deliverVerificationCode(
   user: { id: string; email: string; name: string },
   code: string,
