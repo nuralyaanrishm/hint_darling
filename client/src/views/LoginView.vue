@@ -107,16 +107,6 @@ async function onSubmit() {
           {{ formError }}
         </p>
 
-        <GoogleAuthButton />
-
-        <div
-          class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-ink/40"
-        >
-          <span class="h-px flex-1 bg-rose/20"></span>
-          <span>or</span>
-          <span class="h-px flex-1 bg-rose/20"></span>
-        </div>
-
         <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
           <BaseInput
             id="login-email"
@@ -143,6 +133,8 @@ async function onSubmit() {
             {{ submitting ? "Logging in…" : "Log in" }}
           </BaseButton>
         </form>
+
+        <GoogleAuthButton class="mt-4" />
 
         <p class="mt-6 text-center text-sm text-ink/70">
           New to Hint, Darling?
