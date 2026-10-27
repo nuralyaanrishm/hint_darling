@@ -13,7 +13,7 @@ export function uniqueEmail(label: string, runId: string): string {
   return `hd-test-${label}-${runId}@example.com`;
 }
 
-// Capture verification emails instead of calling Brevo during tests.
+// Capture verification emails instead of calling Mailgun during tests.
 const sentEmails: VerificationEmail[] = [];
 setEmailSenderForTests(async (email) => {
   sentEmails.push(email);

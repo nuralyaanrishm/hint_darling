@@ -55,7 +55,7 @@ hint-darling/
 │  ├─ prisma/migrations/    # Applied SQL migrations (incl. the partial unique index for claims)
 │  ├─ prisma/seed.ts        # Development seed data (demo wishlist + air fryer)
 │  ├─ src/
-│  │  ├─ lib/               # prisma, password hashing, sessions, tokens, validation, email/Brevo, OTPs, ownership, serializers, public projection, claims, share previews
+│  │  ├─ lib/               # prisma, password hashing, sessions, tokens, validation, email/Mailgun, OTPs, ownership, serializers, public projection, claims, share previews
 │  │  ├─ middleware/        # auth (session, CSRF), rate limiting
 │  │  ├─ routes/auth.ts     # /api/auth/* endpoints
 │  │  ├─ routes/events.ts   # /api/events/* endpoints
@@ -160,13 +160,14 @@ Client.
    - `hint_darling` is the database name.
    - `PORT` is the port the Express API listens on (default `3002`).
 
-3. Add a signup OTP secret and Brevo credentials:
+3. Add a signup OTP secret and Mailgun credentials:
 
    ```
    OTP_SECRET="<random secret of at least 16 characters>"
-   BREVO_API_KEY="<your Brevo API key>"
-   BREVO_SENDER_EMAIL="no-reply@yourdomain.com"
-   BREVO_SENDER_NAME="Hint, Darling"
+   MAILGUN_API_KEY="<your Mailgun private API key>"
+   MAILGUN_DOMAIN="sandbox6849f27a01e6422899b034fe42ac6c8e.mailgun.org"
+   MAILGUN_FROM_EMAIL="postmaster@sandbox6849f27a01e6422899b034fe42ac6c8e.mailgun.org"
+   MAILGUN_FROM_NAME="Hint, Darling"
    ```
 
    Generate the secret with:
@@ -175,9 +176,12 @@ Client.
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 
-   In Brevo, create an API key under **SMTP & API → API Keys**, then verify the
-   sender address or its domain under **Senders & Domains**. Without these
-   values registration cannot send a code and returns `502`.
+   In Mailgun, copy the private API key from **Account Settings → API Keys**.
+   Sandbox domains only deliver to addresses you add under **Authorized
+   Recipients**, so add your own email before testing. For an EU account, also
+   set `MAILGUN_BASE_URL="https://api.eu.mailgun.net"`. These values are required
+   in every environment: registration cannot send a code without them, and a
+   rejected send returns `502`.
 
 > `server/.env` is git-ignored. Never commit real credentials.
 
@@ -374,7 +378,7 @@ Cookie-based sessions with no tokens in JavaScript.
   header (double-submit). For signed-in requests the token is also checked
   against the session's stored digest.
 - **Email verification**: registration creates an unverified account and emails
-  a 6-digit code through Brevo. No session is issued until the code is
+  a 6-digit code through Mailgun. No session is issued until the code is
   confirmed, so unverified accounts cannot sign in. Codes expire after 10
   minutes, allow 5 attempts, and can be resent after a 60-second cooldown. Only
   an HMAC-SHA256 digest (keyed by `OTP_SECRET`) is stored; the raw code exists

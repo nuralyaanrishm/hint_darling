@@ -1,7 +1,7 @@
-const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+const DEFAULT_MAILGUN_BASE_URL = "https://api.mailgun.net";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-/** Raised when Brevo is not configured or rejects a send. */
+/** Raised when Mailgun is not configured or rejects a send. */
 export class EmailDeliveryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -25,6 +25,27 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+/** Strips CR/LF so user-controlled names cannot inject extra mail headers. */
+function sanitizeHeaderValue(value: string): string {
+  return value.replaceAll(/[\r\n]+/g, " ").trim();
+}
+
+/** Formats `Name <address>` with a quoted display name, when present. */
+function formatMailbox(name: string, address: string): string {
+  const safeName = sanitizeHeaderValue(name);
+  if (!safeName) {
+    return address;
+  }
+
+  const escapedName = safeName.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return `"${escapedName}" <${address}>`;
+}
+
+function mailgunBaseUrl(): string {
+  const configured = process.env.MAILGUN_BASE_URL?.trim();
+  return (configured || DEFAULT_MAILGUN_BASE_URL).replace(/\/+$/, "");
 }
 
 function verificationEmailContent(email: VerificationEmail): {
@@ -78,55 +99,64 @@ function verificationEmailContent(email: VerificationEmail): {
   };
 }
 
-async function sendViaBrevo(email: VerificationEmail): Promise<void> {
-  const apiKey = process.env.BREVO_API_KEY;
-  const senderEmail = process.env.BREVO_SENDER_EMAIL;
-  const senderName = process.env.BREVO_SENDER_NAME ?? "Hint, Darling";
+async function sendViaMailgun(email: VerificationEmail): Promise<void> {
+  const apiKey = process.env.MAILGUN_API_KEY?.trim();
+  const domain = process.env.MAILGUN_DOMAIN?.trim();
+  const senderEmail = process.env.MAILGUN_FROM_EMAIL?.trim();
+  const senderName = sanitizeHeaderValue(
+    process.env.MAILGUN_FROM_NAME ?? "Hint, Darling",
+  );
 
-  if (!apiKey || !senderEmail) {
-    throw new EmailDeliveryError("Brevo is not configured");
+  if (!apiKey || !domain || !senderEmail) {
+    throw new EmailDeliveryError("Mailgun is not configured");
   }
 
   const content = verificationEmailContent(email);
+  const from = formatMailbox(senderName, senderEmail);
+  const to = formatMailbox(email.name, email.to);
+
+  const body = new URLSearchParams({
+    from,
+    to,
+    subject: content.subject,
+    text: content.textContent,
+    html: content.htmlContent,
+  });
 
   let response: Response;
   try {
-    response = await fetch(BREVO_API_URL, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        "api-key": apiKey,
+    response = await fetch(
+      `${mailgunBaseUrl()}/v3/${encodeURIComponent(domain)}/messages`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString("base64")}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
-      body: JSON.stringify({
-        sender: { name: senderName, email: senderEmail },
-        to: [{ email: email.to, name: email.name || undefined }],
-        subject: content.subject,
-        htmlContent: content.htmlContent,
-        textContent: content.textContent,
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    );
   } catch (error) {
-    throw new EmailDeliveryError("Could not reach Brevo", { cause: error });
+    throw new EmailDeliveryError("Could not reach Mailgun", { cause: error });
   }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new EmailDeliveryError(
-      `Brevo rejected the email (${response.status}): ${detail.slice(0, 300)}`,
+      `Mailgun rejected the email (${response.status}): ${detail.slice(0, 300)}`,
     );
   }
 }
 
-let sender: EmailSender = sendViaBrevo;
+let sender: EmailSender = sendViaMailgun;
 
 /**
  * Replaces the email transport. Tests use this to capture the generated code
- * instead of contacting Brevo; passing `null` restores the real sender.
+ * instead of contacting Mailgun; passing `null` restores the real sender.
  */
 export function setEmailSenderForTests(next: EmailSender | null): void {
-  sender = next ?? sendViaBrevo;
+  sender = next ?? sendViaMailgun;
 }
 
 export async function sendVerificationEmail(email: VerificationEmail): Promise<void> {
