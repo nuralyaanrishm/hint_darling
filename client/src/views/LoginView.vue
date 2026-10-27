@@ -91,8 +91,6 @@ async function onSubmit() {
           <BowDivider />
         </div>
 
-        
-
         <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
           <BaseInput
             id="login-email"
@@ -118,7 +116,8 @@ async function onSubmit() {
           <BaseButton type="submit" block :disabled="submitting" class="mt-2">
             {{ submitting ? "Logging in…" : "Log in" }}
           </BaseButton>
-            <p
+
+           <p
           v-if="oauthError"
           role="alert"
           class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
@@ -135,7 +134,6 @@ async function onSubmit() {
         </p>
 
         <GoogleAuthButton />
-
         </form>
 
         <p class="mt-6 text-center text-sm text-ink/70">
