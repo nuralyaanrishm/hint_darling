@@ -91,31 +91,7 @@ async function onSubmit() {
           <BowDivider />
         </div>
 
-        <p
-          v-if="oauthError"
-          role="alert"
-          class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
-        >
-          {{ oauthError }}
-        </p>
-
-        <p
-          v-if="formError"
-          role="alert"
-          class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
-        >
-          {{ formError }}
-        </p>
-
-        <GoogleAuthButton />
-
-        <div
-          class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-ink/40"
-        >
-          <span class="h-px flex-1 bg-rose/20"></span>
-          <span>or</span>
-          <span class="h-px flex-1 bg-rose/20"></span>
-        </div>
+        
 
         <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
           <BaseInput
@@ -142,6 +118,24 @@ async function onSubmit() {
           <BaseButton type="submit" block :disabled="submitting" class="mt-2">
             {{ submitting ? "Logging in…" : "Log in" }}
           </BaseButton>
+            <p
+          v-if="oauthError"
+          role="alert"
+          class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
+        >
+          {{ oauthError }}
+        </p>
+
+        <p
+          v-if="formError"
+          role="alert"
+          class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
+        >
+          {{ formError }}
+        </p>
+
+        <GoogleAuthButton />
+
         </form>
 
         <p class="mt-6 text-center text-sm text-ink/70">
