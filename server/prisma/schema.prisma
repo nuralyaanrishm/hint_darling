@@ -44,8 +44,12 @@ model User {
   id              String    @id @default(cuid())
   name            String
   email           String    @unique
-  passwordHash    String
-  /// Set once the signup OTP is confirmed. Unverified accounts cannot sign in.
+  /// Null for accounts created through Google sign-in (they have no password).
+  passwordHash    String?
+  /// Google's stable subject identifier, set when the account is linked to Google.
+  googleId        String?   @unique
+  /// Set once the signup OTP is confirmed or Google proves the address. Unverified
+  /// accounts cannot sign in with a password.
   emailVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -119,15 +123,15 @@ model Event {
 }
 
 model Wishlist {
-  id           String       @id @default(cuid())
-  eventId      String       @unique
-  title        String
-  description  String?
-  shareToken   String       @unique
-  privacyMode  PrivacyMode  @default(LINK_ONLY)
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id          String      @id @default(cuid())
+  eventId     String      @unique
+  title       String
+  description String?
+  shareToken  String      @unique
+  privacyMode PrivacyMode @default(LINK_ONLY)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   event Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
   items WishlistItem[]
@@ -166,21 +170,21 @@ model WishlistItem {
 /// index) enforces it at the database level in addition to the service-layer
 /// transaction.
 model GiftClaim {
-  id             String       @id @default(cuid())
+  id             String      @id @default(cuid())
   wishlistItemId String
   /// Present when a registered user claims the gift.
   claimantUserId String?
   /// Private name captured for guest claims; never exposed publicly.
   claimantName   String?
   /// SHA-256 digest of the claim management token, when one is issued.
-  claimTokenHash String?      @unique
+  claimTokenHash String?     @unique
   /// Client-supplied key used to make an accidental double-submit idempotent.
-  idempotencyKey String?      @unique
-  status         ClaimStatus  @default(CLAIMED)
-  claimedAt      DateTime     @default(now())
+  idempotencyKey String?     @unique
+  status         ClaimStatus @default(CLAIMED)
+  claimedAt      DateTime    @default(now())
   cancelledAt    DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   wishlistItem WishlistItem @relation(fields: [wishlistItemId], references: [id], onDelete: Cascade)
   claimantUser User?        @relation(fields: [claimantUserId], references: [id], onDelete: SetNull)

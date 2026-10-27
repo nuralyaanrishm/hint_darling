@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import GoogleAuthButton from "@/components/auth/GoogleAuthButton.vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
 import BaseInput from "@/components/ui/BaseInput.vue";
@@ -15,6 +16,19 @@ import { useAuth } from "@/stores/auth";
 const route = useRoute();
 const router = useRouter();
 const { login } = useAuth();
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  google_denied: "Google sign-in was cancelled.",
+  google_not_configured: "Google sign-in isn't available right now.",
+  google_email_unverified:
+    "Google hasn't verified that email address, so we can't sign you in.",
+  google_failed: "We couldn't sign you in with Google. Please try again.",
+};
+
+const oauthError = computed(() => {
+  const code = typeof route.query.error === "string" ? route.query.error : "";
+  return OAUTH_ERROR_MESSAGES[code] ?? null;
+});
 
 const form = reactive({ email: "", password: "" });
 const fieldErrors = ref<Record<string, string>>({});
@@ -78,12 +92,30 @@ async function onSubmit() {
         </div>
 
         <p
+          v-if="oauthError"
+          role="alert"
+          class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
+        >
+          {{ oauthError }}
+        </p>
+
+        <p
           v-if="formError"
           role="alert"
           class="mb-5 rounded-2xl border border-rose/40 bg-blush/40 px-4 py-3 text-sm text-rose-deep"
         >
           {{ formError }}
         </p>
+
+        <GoogleAuthButton />
+
+        <div
+          class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-ink/40"
+        >
+          <span class="h-px flex-1 bg-rose/20"></span>
+          <span>or</span>
+          <span class="h-px flex-1 bg-rose/20"></span>
+        </div>
 
         <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
           <BaseInput

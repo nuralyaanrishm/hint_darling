@@ -19,6 +19,19 @@ export const loginLimiter = rateLimit({
   },
 });
 
+/** Limits Google OAuth start/callback requests per IP. */
+export const googleOAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isTest ? 10_000 : 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res
+      .status(429)
+      .json(jsonHandler("Too many attempts. Please try again later."));
+  },
+});
+
 /** Limits new account creation to slow down abuse. */
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

@@ -85,6 +85,7 @@ describe("authentication", () => {
 
     const stored = await prisma.user.findUniqueOrThrow({ where: { email } });
     assert.equal(stored.emailVerifiedAt, null);
+    assert.ok(stored.passwordHash, "password accounts should still store a hash");
     assert.notEqual(stored.passwordHash, password);
     assert.match(stored.passwordHash, /^\$argon2id\$/);
 

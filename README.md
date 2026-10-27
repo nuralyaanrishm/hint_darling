@@ -183,6 +183,25 @@ Client.
    required in every environment: registration cannot send a code without them,
    and a rejected send returns `502`.
 
+4. (Optional) Enable **Continue with Google**:
+
+   ```
+   GOOGLE_CLIENT_ID="<your Google OAuth client id>"
+   GOOGLE_CLIENT_SECRET="<your Google OAuth client secret>"
+   ```
+
+   In the [Google Cloud console](https://console.cloud.google.com/apis/credentials),
+   create an OAuth 2.0 Client ID of type **Web application** and add
+   `http://localhost:5173/api/auth/google/callback` as an authorised redirect
+   URI. Add your production callback URL (for example
+   `https://your-domain.com/api/auth/google/callback`) before deploying. The app
+   derives the callback from the request origin, so `GOOGLE_REDIRECT_URI` is only
+   needed if that differs from the URL users visit.
+
+   Google accounts are created as verified and skip the signup OTP. If an
+   unverified password account already uses the same address, it is linked to
+   Google and its unverified password is cleared.
+
 > `server/.env` is git-ignored. Never commit real credentials.
 
 ## Setting up PostgreSQL locally
@@ -384,6 +403,11 @@ Cookie-based sessions with no tokens in JavaScript.
   an HMAC-SHA256 digest (keyed by `OTP_SECRET`) is stored; the raw code exists
   only in the email. Existing accounts are backfilled as verified by the
   migration.
+- **Google sign-in**: an optional authorization-code flow. The browser is sent
+  to Google with a random `state` stored in a short-lived HTTP-only cookie, and
+  the callback exchanges the code, reads Google's verified profile, links or
+  creates the account, and starts the same cookie session as password login. No
+  Google tokens or passwords are stored for Google-only accounts.
 - **Validation**: requests are validated server-side with Zod; the API returns
   `{ error: { message, fields } }` for the forms to display.
 - **Rate limiting**: `/api/auth/login`, `/api/auth/register`,
@@ -398,13 +422,17 @@ Cookie-based sessions with no tokens in JavaScript.
 | `POST` | `/api/auth/verify-email`      | Confirm the code, verify the email and sign in.   |
 | `POST` | `/api/auth/resend-verification` | Send a fresh code (always answers generically). |
 | `POST` | `/api/auth/login`             | Sign in and start a session.                      |
+| `GET`  | `/api/auth/google`            | Start Google sign-in (redirects to Google).       |
+| `GET`  | `/api/auth/google/callback`   | Exchange the Google code and start a session.     |
 | `POST` | `/api/auth/logout`            | Invalidate the session and clear cookies.         |
 | `GET`  | `/api/auth/me`                | Return the current user, or `401`.                |
 
 An unverified login with the correct password returns `403` with
 `code: "EMAIL_NOT_VERIFIED"`, which the client uses to send the user to the
 verification screen. Session tokens are random opaque values and only their
-digests are persisted; `OTP_SECRET` is the only auth-related secret to set.
+digests are persisted. `OTP_SECRET` is the only auth-related secret for password
+sign-in; Google sign-in additionally needs `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET`.
 
 ### Events and wishlists
 

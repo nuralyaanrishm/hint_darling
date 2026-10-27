@@ -8,6 +8,20 @@ import {
   issueVerificationCode,
 } from "../lib/emailVerification.js";
 import { HttpError } from "../lib/errors.js";
+import {
+  buildGoogleAuthorizeUrl,
+  clearOAuthCookies,
+  exchangeGoogleCode,
+  fetchGoogleProfile,
+  googleRedirectUri,
+  isGoogleOAuthConfigured,
+  oauthStateMatches,
+  readOAuthReturnTo,
+  readOAuthState,
+  safeReturnPath,
+  setOAuthCookies,
+  type GoogleProfile,
+} from "../lib/googleOAuth.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { prisma } from "../lib/prisma.js";
 import {
@@ -18,6 +32,7 @@ import {
   deleteSession,
   setSessionCookie,
 } from "../lib/session.js";
+import { generateToken } from "../lib/tokens.js";
 import {
   formatZodError,
   loginSchema,
@@ -26,6 +41,7 @@ import {
   verifyEmailSchema,
 } from "../lib/validation.js";
 import {
+  googleOAuthLimiter,
   loginLimiter,
   registerLimiter,
   resendVerificationLimiter,
@@ -88,6 +104,154 @@ function isUniqueConstraintError(error: unknown): boolean {
 // GET /api/auth/csrf — ensures a CSRF cookie exists and returns its value.
 authRouter.get("/csrf", (_req, res) => {
   res.json({ csrfToken: res.locals.csrfToken });
+});
+
+/**
+ * Finds the account for a Google profile, creating or linking it as needed.
+ * Google has already verified the address, so Google-only accounts skip the
+ * signup OTP. An unverified password account is linked only after its unverified
+ * password is cleared: otherwise someone who registered the address without
+ * owning it would keep a working password.
+ */
+async function findOrCreateGoogleUser(profile: GoogleProfile) {
+  const linked = await prisma.user.findUnique({
+    where: { googleId: profile.googleId },
+  });
+
+  if (linked) {
+    if (linked.emailVerifiedAt) {
+      return linked;
+    }
+
+    return prisma.user.update({
+      where: { id: linked.id },
+      data: { emailVerifiedAt: new Date() },
+    });
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { email: profile.email },
+  });
+
+  if (existing) {
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        googleId: existing.googleId ?? profile.googleId,
+        emailVerifiedAt: existing.emailVerifiedAt ?? new Date(),
+        ...(existing.emailVerifiedAt ? {} : { passwordHash: null }),
+      },
+    });
+  }
+
+  try {
+    return await prisma.user.create({
+      data: {
+        name: profile.name,
+        email: profile.email,
+        googleId: profile.googleId,
+        emailVerifiedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    // A concurrent callback may have created the account first.
+    const raced = await prisma.user.findUnique({
+      where: { googleId: profile.googleId },
+    });
+
+    if (raced) {
+      return raced;
+    }
+
+    const racedEmail = await prisma.user.findUnique({
+      where: { email: profile.email },
+    });
+
+    if (!racedEmail) {
+      throw error;
+    }
+
+    return prisma.user.update({
+      where: { id: racedEmail.id },
+      data: {
+        googleId: racedEmail.googleId ?? profile.googleId,
+        emailVerifiedAt: racedEmail.emailVerifiedAt ?? new Date(),
+        ...(racedEmail.emailVerifiedAt ? {} : { passwordHash: null }),
+      },
+    });
+  }
+}
+
+function redirectToLoginError(res: Response, code: string): void {
+  res.redirect(302, `/login?error=${encodeURIComponent(code)}`);
+}
+
+// GET /api/auth/google — starts the Google authorization code flow.
+authRouter.get("/google", googleOAuthLimiter, (req, res) => {
+  if (!isGoogleOAuthConfigured()) {
+    redirectToLoginError(res, "google_not_configured");
+    return;
+  }
+
+  const state = generateToken(24);
+  const authorizeUrl = buildGoogleAuthorizeUrl(req, state);
+
+  if (!authorizeUrl) {
+    redirectToLoginError(res, "google_not_configured");
+    return;
+  }
+
+  const returnTo = safeReturnPath(req.query.redirect);
+  setOAuthCookies(res, state, returnTo);
+  res.redirect(302, authorizeUrl);
+});
+
+// GET /api/auth/google/callback — verifies state, links the account, signs in.
+authRouter.get("/google/callback", googleOAuthLimiter, async (req, res) => {
+  const expectedState = readOAuthState(req);
+  const returnTo = readOAuthReturnTo(req);
+  clearOAuthCookies(res);
+
+  if (typeof req.query.error === "string") {
+    redirectToLoginError(res, "google_denied");
+    return;
+  }
+
+  if (!oauthStateMatches(expectedState, req.query.state)) {
+    redirectToLoginError(res, "google_failed");
+    return;
+  }
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+
+  if (!code) {
+    redirectToLoginError(res, "google_failed");
+    return;
+  }
+
+  try {
+    const accessToken = await exchangeGoogleCode(
+      code,
+      googleRedirectUri(req),
+    );
+    const profile = await fetchGoogleProfile(accessToken);
+
+    if (!profile.emailVerified) {
+      redirectToLoginError(res, "google_email_unverified");
+      return;
+    }
+
+    const user = await findOrCreateGoogleUser(profile);
+    await startSession(req, res, user);
+    res.redirect(302, returnTo ?? "/dashboard");
+  } catch (error) {
+    console.error("Google OAuth callback failed:", error);
+    redirectToLoginError(res, "google_failed");
+  }
 });
 
 /** Sends the current signup code, cleaning it up if Brevo rejects the mail. */

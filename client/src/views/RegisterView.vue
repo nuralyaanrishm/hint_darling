@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
+import GoogleAuthButton from "@/components/auth/GoogleAuthButton.vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
 import BaseInput from "@/components/ui/BaseInput.vue";
@@ -86,6 +87,16 @@ async function onSubmit() {
         >
           {{ formError }}
         </p>
+
+        <GoogleAuthButton />
+
+        <div
+          class="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-ink/40"
+        >
+          <span class="h-px flex-1 bg-rose/20"></span>
+          <span>or</span>
+          <span class="h-px flex-1 bg-rose/20"></span>
+        </div>
 
         <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
           <BaseInput
