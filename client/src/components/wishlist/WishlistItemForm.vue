@@ -109,7 +109,7 @@ function onSubmit() {
         :error="fieldErrors.name"
       />
 
-      <div class="grid gap-4 sm:grid-cols-2">
+      <div class="grid gap-4 sm:grid-cols-3">
         <BaseInput
           id="item-product-url"
           v-model="form.productUrl"
@@ -126,25 +126,7 @@ function onSubmit() {
           placeholder="https://…"
           :error="fieldErrors.imageUrl"
         />
-      </div>
-
-      <div class="grid gap-4 sm:grid-cols-3">
-        <BaseInput
-          id="item-price"
-          v-model="form.price"
-          label="Price (optional)"
-          type="number"
-          placeholder="0.00"
-          :error="fieldErrors.price"
-        />
-        <BaseSelect
-          id="item-currency"
-          v-model="form.currency"
-          label="Currency"
-          :options="CURRENCY_OPTIONS"
-          :error="fieldErrors.currency"
-        />
-        <BaseInput
+            <BaseInput
           id="item-quantity"
           v-model="form.quantity"
           label="Quantity"
@@ -153,35 +135,20 @@ function onSubmit() {
         />
       </div>
 
-      <BaseTextarea
-        id="item-description"
-        v-model="form.description"
-        label="Description (optional)"
-        :rows="2"
-        :error="fieldErrors.description"
-      />
-
-      <div class="grid gap-4 sm:grid-cols-3">
+      <div class="grid gap-4 sm:grid-cols-2">
         <BaseInput
           id="item-colour"
           v-model="form.preferredColour"
-          label="Preferred colour"
+          label="Preferred colour (optional)"
           placeholder="Stone"
           :error="fieldErrors.preferredColour"
         />
         <BaseInput
           id="item-size"
           v-model="form.preferredSize"
-          label="Preferred size"
+          label="Preferred size (optional)"
           placeholder="Queen"
           :error="fieldErrors.preferredSize"
-        />
-        <BaseInput
-          id="item-variation"
-          v-model="form.preferredVariation"
-          label="Model / variation"
-          placeholder="Cream"
-          :error="fieldErrors.preferredVariation"
         />
       </div>
 

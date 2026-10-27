@@ -55,7 +55,7 @@ hint-darling/
 │  ├─ prisma/migrations/    # Applied SQL migrations (incl. the partial unique index for claims)
 │  ├─ prisma/seed.ts        # Development seed data (demo wishlist + air fryer)
 │  ├─ src/
-│  │  ├─ lib/               # prisma, password hashing, sessions, tokens, validation, ownership, serializers, public projection, claims, share previews
+│  │  ├─ lib/               # prisma, password hashing, sessions, tokens, validation, email/Brevo, OTPs, ownership, serializers, public projection, claims, share previews
 │  │  ├─ middleware/        # auth (session, CSRF), rate limiting
 │  │  ├─ routes/auth.ts     # /api/auth/* endpoints
 │  │  ├─ routes/events.ts   # /api/events/* endpoints
@@ -160,6 +160,25 @@ Client.
    - `hint_darling` is the database name.
    - `PORT` is the port the Express API listens on (default `3002`).
 
+3. Add a signup OTP secret and Brevo credentials:
+
+   ```
+   OTP_SECRET="<random secret of at least 16 characters>"
+   BREVO_API_KEY="<your Brevo API key>"
+   BREVO_SENDER_EMAIL="no-reply@yourdomain.com"
+   BREVO_SENDER_NAME="Hint, Darling"
+   ```
+
+   Generate the secret with:
+
+   ```sh
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+   In Brevo, create an API key under **SMTP & API → API Keys**, then verify the
+   sender address or its domain under **Senders & Domains**. Without these
+   values registration cannot send a code and returns `502`.
+
 > `server/.env` is git-ignored. Never commit real credentials.
 
 ## Setting up PostgreSQL locally
@@ -237,7 +256,8 @@ The Prisma schema defines the following models:
 
 | Model          | Purpose                                                                 |
 | -------------- | ----------------------------------------------------------------------- |
-| `User`         | Owner account (`email` is unique; only `passwordHash` is stored).       |
+| `User`         | Owner account (`email` is unique; only `passwordHash` is stored; `emailVerifiedAt` gates sign-in). |
+| `EmailVerification` | One active signup OTP per account, stored only as an HMAC digest with an expiry, attempt count and resend timestamp. |
 | `Session`      | Server-side session keyed by a SHA-256 digest of the cookie token.      |
 | `Event`        | An owner's occasion (wedding, birthday, festive celebration, …).        |
 | `Wishlist`     | One list per event, with a unique `shareToken`.                          |
@@ -353,22 +373,34 @@ Cookie-based sessions with no tokens in JavaScript.
 - **CSRF**: a script-readable `hd_csrf` cookie plus a matching `X-CSRF-Token`
   header (double-submit). For signed-in requests the token is also checked
   against the session's stored digest.
+- **Email verification**: registration creates an unverified account and emails
+  a 6-digit code through Brevo. No session is issued until the code is
+  confirmed, so unverified accounts cannot sign in. Codes expire after 10
+  minutes, allow 5 attempts, and can be resent after a 60-second cooldown. Only
+  an HMAC-SHA256 digest (keyed by `OTP_SECRET`) is stored; the raw code exists
+  only in the email. Existing accounts are backfilled as verified by the
+  migration.
 - **Validation**: requests are validated server-side with Zod; the API returns
   `{ error: { message, fields } }` for the forms to display.
-- **Rate limiting**: `/api/auth/login` and `/api/auth/register` are throttled.
+- **Rate limiting**: `/api/auth/login`, `/api/auth/register`,
+  `/api/auth/verify-email` and `/api/auth/resend-verification` are throttled.
 
 ### API endpoints
 
-| Method | Path                 | Description                                  |
-| ------ | -------------------- | -------------------------------------------- |
-| `GET`  | `/api/auth/csrf`     | Issue/return the CSRF token.                 |
-| `POST` | `/api/auth/register` | Create an account and start a session.       |
-| `POST` | `/api/auth/login`    | Sign in and start a session.                 |
-| `POST` | `/api/auth/logout`   | Invalidate the session and clear cookies.    |
-| `GET`  | `/api/auth/me`       | Return the current user, or `401`.           |
+| Method | Path                          | Description                                       |
+| ------ | ----------------------------- | ------------------------------------------------- |
+| `GET`  | `/api/auth/csrf`              | Issue/return the CSRF token.                      |
+| `POST` | `/api/auth/register`          | Create an unverified account and email a code.    |
+| `POST` | `/api/auth/verify-email`      | Confirm the code, verify the email and sign in.   |
+| `POST` | `/api/auth/resend-verification` | Send a fresh code (always answers generically). |
+| `POST` | `/api/auth/login`             | Sign in and start a session.                      |
+| `POST` | `/api/auth/logout`            | Invalidate the session and clear cookies.         |
+| `GET`  | `/api/auth/me`                | Return the current user, or `401`.                |
 
-No authentication secret needs to be configured: tokens are random opaque
-values, and only their digests are persisted.
+An unverified login with the correct password returns `403` with
+`code: "EMAIL_NOT_VERIFIED"`, which the client uses to send the user to the
+verification screen. Session tokens are random opaque values and only their
+digests are persisted; `OTP_SECRET` is the only auth-related secret to set.
 
 ### Events and wishlists
 
@@ -452,9 +484,11 @@ PostgreSQL:
 npm test
 ```
 
-They cover registration, duplicate-email handling, validation errors, login,
-incorrect passwords, user-enumeration resistance, logout/session invalidation,
-protected-route access and CSRF rejection — plus event and wishlist management:
+They cover registration, OTP email verification, duplicate-email handling,
+validation errors, wrong/expired/exhausted codes, resend cooldowns and code
+rotation, unverified-login blocking, incorrect passwords, user-enumeration
+resistance, logout/session invalidation, protected-route access and CSRF
+rejection — plus event and wishlist management:
 creating, editing and deleting an owner's events, adding/editing/removing gift
 items, reordering, rejecting unsafe URLs, and confirming that **another user
 cannot view, change or delete events, wishlists or items they don't own**.

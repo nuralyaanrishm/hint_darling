@@ -84,7 +84,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             to="/dashboard"
             class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
           >
-            Dashboard
+            Me
           </RouterLink>
           <button
             type="button"
@@ -172,7 +172,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             to="/dashboard"
             class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
           >
-            Dashboard
+            Me
           </RouterLink>
           <button
             type="button"

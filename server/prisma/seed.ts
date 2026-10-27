@@ -23,8 +23,13 @@ async function main(): Promise<void> {
 
   const owner = await prisma.user.upsert({
     where: { email: DEMO_EMAIL },
-    update: { name: "Emma & James" },
-    create: { email: DEMO_EMAIL, name: "Emma & James", passwordHash },
+    update: { name: "Emma & James", emailVerifiedAt: new Date() },
+    create: {
+      email: DEMO_EMAIL,
+      name: "Emma & James",
+      passwordHash,
+      emailVerifiedAt: new Date(),
+    },
   });
 
   const event = await prisma.event.upsert({

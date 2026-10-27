@@ -46,6 +46,8 @@ interface EventRecord {
   eventDate: Date | null;
   description: string | null;
   location: string | null;
+  latitude: number | null;
+  longitude: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -144,6 +146,8 @@ export interface EventSummaryDto {
   eventDate: string | null;
   description: string | null;
   location: string | null;
+  latitude: number | null;
+  longitude: number | null;
   wishlist: WishlistSummaryDto | null;
   createdAt: string;
   updatedAt: string;
@@ -167,6 +171,8 @@ export function toEventSummaryDto(
     eventDate: event.eventDate?.toISOString() ?? null,
     description: event.description,
     location: event.location,
+    latitude: event.latitude,
+    longitude: event.longitude,
     wishlist: event.wishlist
       ? {
           id: event.wishlist.id,
@@ -196,6 +202,8 @@ export function toEventDto(
     eventDate: event.eventDate?.toISOString() ?? null,
     description: event.description,
     location: event.location,
+    latitude: event.latitude,
+    longitude: event.longitude,
     wishlist: event.wishlist ? toWishlistDto(event.wishlist) : null,
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString(),

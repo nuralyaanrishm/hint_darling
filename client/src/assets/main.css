@@ -61,6 +61,23 @@
   }
 }
 
+/* Keep Leaflet's internal controls and panes below the sticky navbar. */
+.leaflet-container {
+  z-index: 0;
+  font-family: var(--font-sans);
+}
+
+/* Transparent wrapper so only the custom SVG pin is visible. */
+.hd-map-pin {
+  border: 0;
+  background: transparent;
+}
+
+/* Round the OSM tiles so maps match the surrounding card treatment. */
+.hd-map .leaflet-tile-pane {
+  border-radius: 1.25rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

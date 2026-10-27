@@ -4,6 +4,7 @@ import PlaceholderView from "@/views/PlaceholderView.vue";
 import NotFoundView from "@/views/NotFoundView.vue";
 import LoginView from "@/views/LoginView.vue";
 import RegisterView from "@/views/RegisterView.vue";
+import VerifyEmailView from "@/views/VerifyEmailView.vue";
 import DashboardView from "@/views/DashboardView.vue";
 import EventFormView from "@/views/EventFormView.vue";
 import EventDetailView from "@/views/EventDetailView.vue";
@@ -49,6 +50,15 @@ const router = createRouter({
       component: RegisterView,
       meta: {
         title: "Create your account",
+        guestOnly: true,
+      },
+    },
+    {
+      path: "/verify-email",
+      name: "verify-email",
+      component: VerifyEmailView,
+      meta: {
+        title: "Verify your email",
         guestOnly: true,
       },
     },

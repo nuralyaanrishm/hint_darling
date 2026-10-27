@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { createApp } from "../app.js";
+import { setEmailSenderForTests, type VerificationEmail } from "../lib/email.js";
 import { prisma } from "../lib/prisma.js";
 
 /** Generates a per-run suffix so test data never collides between runs. */
@@ -10,6 +11,34 @@ export function makeRunId(): string {
 /** A unique, obviously-test email address. */
 export function uniqueEmail(label: string, runId: string): string {
   return `hd-test-${label}-${runId}@example.com`;
+}
+
+// Capture verification emails instead of calling Brevo during tests.
+const sentEmails: VerificationEmail[] = [];
+setEmailSenderForTests(async (email) => {
+  sentEmails.push(email);
+});
+
+/** Every verification email captured so far in this test process. */
+export function sentVerificationEmails(): readonly VerificationEmail[] {
+  return sentEmails;
+}
+
+/** The most recent code sent to an address, or undefined when none was sent. */
+export function lastVerificationCode(email: string): string | undefined {
+  const address = email.trim().toLowerCase();
+  for (let i = sentEmails.length - 1; i >= 0; i -= 1) {
+    if (sentEmails[i]?.to === address) {
+      return sentEmails[i]?.code;
+    }
+  }
+  return undefined;
+}
+
+/** Number of verification emails captured for an address. */
+export function verificationEmailCount(address: string): number {
+  const normalised = address.trim().toLowerCase();
+  return sentEmails.filter((email) => email.to === normalised).length;
 }
 
 /** A minimal cookie-jar HTTP client that also echoes the CSRF cookie. */
@@ -85,6 +114,42 @@ export class TestClient {
   get sessionCookie(): string | undefined {
     return this.cookies.get("hd_session");
   }
+}
+
+export interface TestCredentials {
+  name: string;
+  email: string;
+  password: string;
+}
+
+/**
+ * Registers an account and completes the emailed OTP, leaving `client` signed
+ * in. Returns the verification response (or the failed registration response).
+ */
+export async function registerVerified(
+  client: TestClient,
+  credentials: TestCredentials,
+): Promise<{ status: number; body: any }> {
+  await client.ensureCsrf();
+  const registered = await client.request("POST", "/api/auth/register", {
+    json: credentials,
+  });
+
+  if (registered.status !== 202) {
+    return registered;
+  }
+
+  const code = lastVerificationCode(credentials.email);
+  if (!code) {
+    const recipients = sentEmails.map((email) => email.to).join(", ") || "none";
+    throw new Error(
+      `No verification code was sent to ${credentials.email} (captured: ${recipients})`,
+    );
+  }
+
+  return client.request("POST", "/api/auth/verify-email", {
+    json: { email: credentials.email, code },
+  });
 }
 
 export interface TestHarness {

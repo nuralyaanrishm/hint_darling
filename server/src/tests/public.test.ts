@@ -4,6 +4,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { prisma } from "../lib/prisma.js";
 import {
   makeRunId,
+  registerVerified,
   startTestServer,
   TestClient,
   type TestHarness,
@@ -51,10 +52,12 @@ async function makeFixture(label: string): Promise<Fixture> {
   const owner = new TestClient(baseUrl);
   await owner.ensureCsrf();
   const ownerEmail = freshEmail(label);
-  const registered = await owner.request("POST", "/api/auth/register", {
-    json: { name: label, email: ownerEmail, password },
+  const registered = await registerVerified(owner, {
+    name: label,
+    email: ownerEmail,
+    password,
   });
-  assert.equal(registered.status, 201);
+  assert.equal(registered.status, 200);
 
   const event = await owner.request("POST", "/api/events", {
     json: {
@@ -62,6 +65,9 @@ async function makeFixture(label: string): Promise<Fixture> {
       type: "WEDDING",
       eventDate: "2026-09-12T00:00:00.000Z",
       description: "We can't wait to celebrate with you.",
+      location: "The Old Barn, Somerset",
+      latitude: 51.1279,
+      longitude: -3.0026,
     },
   });
   assert.equal(event.status, 201);
@@ -152,6 +158,9 @@ describe("public wishlist viewing", () => {
     assert.equal(wishlist.event.name, "Emma & James");
     assert.equal(wishlist.event.type, "WEDDING");
     assert.ok(wishlist.event.eventDate);
+    assert.equal(wishlist.event.location, "The Old Barn, Somerset");
+    assert.equal(wishlist.event.latitude, 51.1279);
+    assert.equal(wishlist.event.longitude, -3.0026);
     assert.equal(wishlist.items.length, 1);
 
     const gift = wishlist.items[0];

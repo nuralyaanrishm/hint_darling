@@ -44,6 +44,8 @@ const pageError = ref<string | null>(null);
 
 const wishlist = computed(() => event.value?.wishlist ?? null);
 
+
+
 const dateLabel = computed(() => {
   const value = event.value?.eventDate;
   if (!value) return null;
@@ -350,7 +352,7 @@ watch(
     <BaseCard v-else-if="loadError" elevated class="mt-8 text-center">
       <p class="text-sm text-ink/75">{{ loadError }}</p>
       <BaseButton to="/dashboard" variant="secondary" class="mt-5">
-        Back to dashboard
+        Back to Me
       </BaseButton>
     </BaseCard>
 
@@ -392,6 +394,7 @@ watch(
           </BaseButton>
         </div>
       </header>
+
 
       <p
         v-if="pageError"

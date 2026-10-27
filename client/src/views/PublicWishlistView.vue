@@ -7,9 +7,9 @@ import LoadingState from "@/components/ui/LoadingState.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
 import FloralSprig from "@/components/decor/FloralSprig.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
+import EventLocationMap from "@/components/map/EventLocationMap.vue";
 import ClaimDialog from "@/components/wishlist/ClaimDialog.vue";
 import PublicGiftCard from "@/components/wishlist/PublicGiftCard.vue";
-import WishlistSharePanel from "@/components/wishlist/WishlistSharePanel.vue";
 import { eventTypeLabel } from "@/lib/eventOptions";
 import {
   getPublicWishlist,
@@ -51,6 +51,18 @@ const dateLabel = computed(() => {
 });
 
 const giftCount = computed(() => wishlist.value?.items.length ?? 0);
+
+const locationCoordinates = computed(() => {
+  const current = wishlist.value;
+  if (
+    !current ||
+    current.event.latitude === null ||
+    current.event.longitude === null
+  ) {
+    return null;
+  }
+  return { lat: current.event.latitude, lng: current.event.longitude };
+});
 
 async function load() {
   loading.value = true;
@@ -273,11 +285,11 @@ watch(shareToken, () => {
           </p>
         </header>
 
-        <!-- Share -->
-        <div class="mt-8">
-          <WishlistSharePanel
-            :share-token="shareToken"
-            :share-title="`${wishlist.event.name} · ${wishlist.title}`"
+        <div v-if="locationCoordinates" class="mt-8">
+          <EventLocationMap
+            :latitude="locationCoordinates.lat"
+            :longitude="locationCoordinates.lng"
+            :label="wishlist.event.location ?? wishlist.event.name"
           />
         </div>
 

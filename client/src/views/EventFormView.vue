@@ -7,8 +7,10 @@ import BaseInput from "@/components/ui/BaseInput.vue";
 import BaseSelect from "@/components/ui/BaseSelect.vue";
 import BaseTextarea from "@/components/ui/BaseTextarea.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
+import LocationMapPicker from "@/components/map/LocationMapPicker.vue";
 import LoadingState from "@/components/ui/LoadingState.vue";
 import { EVENT_TYPE_OPTIONS } from "@/lib/eventOptions";
+import type { Coordinate } from "@/lib/map";
 import {
   createEvent,
   getEvent,
@@ -33,6 +35,19 @@ const form = reactive({
   eventDate: "",
   description: "",
   location: "",
+  latitude: null as number | null,
+  longitude: null as number | null,
+});
+
+const coordinates = computed<Coordinate | null>({
+  get: () =>
+    form.latitude !== null && form.longitude !== null
+      ? { lat: form.latitude, lng: form.longitude }
+      : null,
+  set: (value) => {
+    form.latitude = value?.lat ?? null;
+    form.longitude = value?.lng ?? null;
+  },
 });
 
 const fieldErrors = ref<Record<string, string>>({});
@@ -57,6 +72,8 @@ function resetForm() {
   form.eventDate = "";
   form.description = "";
   form.location = "";
+  form.latitude = null;
+  form.longitude = null;
   fieldErrors.value = {};
   formError.value = null;
   loadError.value = null;
@@ -81,6 +98,8 @@ async function load() {
     form.eventDate = event.eventDate ? event.eventDate.slice(0, 10) : "";
     form.description = event.description ?? "";
     form.location = event.location ?? "";
+    form.latitude = event.latitude;
+    form.longitude = event.longitude;
   } catch (error) {
     if (isApiError(error) && error.status === 401) {
       redirectToLogin();
@@ -120,6 +139,8 @@ async function onSubmit() {
       eventDate: form.eventDate || null,
       description: form.description.trim() || null,
       location: form.location.trim() || null,
+      latitude: form.latitude,
+      longitude: form.longitude,
     };
 
     const saved = isEdit.value
@@ -179,7 +200,7 @@ watch(() => route.fullPath, load);
     <BaseCard v-else-if="loadError" elevated class="text-center">
       <p class="text-sm text-ink/75">{{ loadError }}</p>
       <BaseButton to="/dashboard" variant="secondary" class="mt-5">
-        Back to dashboard
+        Back to Me
       </BaseButton>
     </BaseCard>
 
@@ -217,12 +238,11 @@ watch(() => route.fullPath, load);
           type="date"
           :error="fieldErrors.eventDate"
         />
-        <BaseInput
-          id="event-location"
-          v-model="form.location"
-          label="Location (optional)"
-          placeholder="The Old Barn, Somerset"
-          :error="fieldErrors.location"
+        <LocationMapPicker
+          v-model="coordinates"
+          v-model:location="form.location"
+          :location-error="fieldErrors.location"
+          :error="fieldErrors.latitude ?? fieldErrors.longitude"
         />
         <BaseTextarea
           id="event-description"

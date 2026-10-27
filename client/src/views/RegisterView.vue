@@ -46,12 +46,15 @@ async function onSubmit() {
   submitting.value = true;
 
   try {
-    await register({
+    const result = await register({
       name: form.name.trim(),
       email: form.email.trim(),
       password: form.password,
     });
-    await router.push("/dashboard");
+    await router.push({
+      name: "verify-email",
+      query: { email: result.email, sent: "1" },
+    });
   } catch (error) {
     if (isApiError(error)) {
       formError.value = error.message;

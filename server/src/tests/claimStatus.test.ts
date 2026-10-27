@@ -4,6 +4,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { prisma } from "../lib/prisma.js";
 import {
   makeRunId,
+  registerVerified,
   startTestServer,
   TestClient,
   type TestHarness,
@@ -59,10 +60,12 @@ async function makeFixture(label: string): Promise<Fixture> {
   const owner = new TestClient(baseUrl);
   await owner.ensureCsrf();
   const ownerEmail = freshEmail(label);
-  const registered = await owner.request("POST", "/api/auth/register", {
-    json: { name: "Owner", email: ownerEmail, password },
+  const registered = await registerVerified(owner, {
+    name: "Owner",
+    email: ownerEmail,
+    password,
   });
-  assert.equal(registered.status, 201);
+  assert.equal(registered.status, 200);
 
   const event = await owner.request("POST", "/api/events", {
     json: { name: "Emma & James", type: "WEDDING" },
@@ -90,10 +93,12 @@ async function makeFixture(label: string): Promise<Fixture> {
   const giver = new TestClient(baseUrl);
   await giver.ensureCsrf();
   const giverName = "Secret Account Giver";
-  const giverRegistered = await giver.request("POST", "/api/auth/register", {
-    json: { name: giverName, email: freshEmail(`giver-${label}`), password },
+  const giverRegistered = await registerVerified(giver, {
+    name: giverName,
+    email: freshEmail(`giver-${label}`),
+    password,
   });
-  assert.equal(giverRegistered.status, 201);
+  assert.equal(giverRegistered.status, 200);
 
   return {
     owner,
@@ -242,9 +247,12 @@ describe("signed-in gift-giver", () => {
     // An unrelated signed-in guest sees only an empty list of *their* claims.
     const outsider = new TestClient(baseUrl);
     await outsider.ensureCsrf();
-    await outsider.request("POST", "/api/auth/register", {
-      json: { name: "Outsider", email: freshEmail("outsider"), password },
+    const outsiderRegistered = await registerVerified(outsider, {
+      name: "Outsider",
+      email: freshEmail("outsider"),
+      password,
     });
+    assert.equal(outsiderRegistered.status, 200);
     const theirs = await outsider.request("GET", "/api/claims");
     assert.equal(theirs.status, 200);
     assert.deepEqual(theirs.body.claims, [], "outsider sees no one else's claims");

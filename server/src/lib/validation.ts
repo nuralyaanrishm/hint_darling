@@ -33,8 +33,33 @@ export const loginSchema = z.object({
     .max(200, "Password must be 200 characters or fewer"),
 });
 
+const emailField = z
+  .string({ error: "Email is required" })
+  .trim()
+  .toLowerCase()
+  .min(1, "Email is required")
+  .max(254, "Email must be 254 characters or fewer")
+  .email("Enter a valid email address");
+
+export const verifyEmailSchema = z.object({
+  email: emailField,
+  code: z.preprocess(
+    (value) => (typeof value === "number" ? String(value) : value),
+    z
+      .string({ error: "Verification code is required" })
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit code from your email"),
+  ),
+});
+
+export const resendVerificationSchema = z.object({
+  email: emailField,
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 
 // ---------------------------------------------------------------------------
 // Events and wishlists
@@ -129,6 +154,28 @@ const optionalQuantity = z.preprocess(
     .optional(),
 );
 
+/** Optional map latitude, clearing with `""`/null. */
+const nullableLatitude = z.preprocess(
+  (value) => (value === "" ? null : value),
+  z
+    .number({ error: "Enter a valid latitude" })
+    .min(-90, "Latitude must be between -90 and 90")
+    .max(90, "Latitude must be between -90 and 90")
+    .nullable()
+    .optional(),
+);
+
+/** Optional map longitude, clearing with `""`/null. */
+const nullableLongitude = z.preprocess(
+  (value) => (value === "" ? null : value),
+  z
+    .number({ error: "Enter a valid longitude" })
+    .min(-180, "Longitude must be between -180 and 180")
+    .max(180, "Longitude must be between -180 and 180")
+    .nullable()
+    .optional(),
+);
+
 const optionalCurrency = z.preprocess(
   (value) => (value === undefined || value === null || value === "" ? undefined : value),
   z
@@ -144,30 +191,54 @@ const itemName = z
   .min(1, "Name is required")
   .max(160, "Name must be 160 characters or fewer");
 
-export const createEventSchema = z.object({
-  name: z
-    .string({ error: "Name is required" })
-    .trim()
-    .min(1, "Name is required")
-    .max(120, "Name must be 120 characters or fewer"),
-  type: eventTypeSchema,
-  eventDate: nullableDate,
-  description: nullableText(2000, "Description"),
-  location: nullableText(200, "Location"),
-});
+function requireCoordinatePair(
+  data: { latitude?: number | null; longitude?: number | null },
+  ctx: z.RefinementCtx,
+) {
+  const hasLatitude = typeof data.latitude === "number";
+  const hasLongitude = typeof data.longitude === "number";
 
-export const updateEventSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, "Name is required")
-    .max(120, "Name must be 120 characters or fewer")
-    .optional(),
-  type: eventTypeSchema.optional(),
-  eventDate: nullableDate,
-  description: nullableText(2000, "Description"),
-  location: nullableText(200, "Location"),
-});
+  if (hasLatitude !== hasLongitude) {
+    ctx.addIssue({
+      code: "custom",
+      path: [hasLatitude ? "longitude" : "latitude"],
+      message: "Choose both a latitude and longitude, or neither.",
+    });
+  }
+}
+
+export const createEventSchema = z
+  .object({
+    name: z
+      .string({ error: "Name is required" })
+      .trim()
+      .min(1, "Name is required")
+      .max(120, "Name must be 120 characters or fewer"),
+    type: eventTypeSchema,
+    eventDate: nullableDate,
+    description: nullableText(2000, "Description"),
+    location: nullableText(200, "Location"),
+    latitude: nullableLatitude,
+    longitude: nullableLongitude,
+  })
+  .superRefine(requireCoordinatePair);
+
+export const updateEventSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, "Name is required")
+      .max(120, "Name must be 120 characters or fewer")
+      .optional(),
+    type: eventTypeSchema.optional(),
+    eventDate: nullableDate,
+    description: nullableText(2000, "Description"),
+    location: nullableText(200, "Location"),
+    latitude: nullableLatitude,
+    longitude: nullableLongitude,
+  })
+  .superRefine(requireCoordinatePair);
 
 /** How discoverable a wishlist is to guests (mirrors the Prisma enum). */
 export const privacyModeSchema = z.enum(["PUBLIC", "LINK_ONLY", "PRIVATE"]);

@@ -4,6 +4,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { prisma } from "../lib/prisma.js";
 import {
   makeRunId,
+  registerVerified,
   startTestServer,
   TestClient,
   type TestHarness,
@@ -39,10 +40,12 @@ function skipWithoutDb(t: TestContext): boolean {
 async function registerUser(label: string): Promise<TestClient> {
   const client = new TestClient(baseUrl);
   await client.ensureCsrf();
-  const response = await client.request("POST", "/api/auth/register", {
-    json: { name: label, email: freshEmail(label), password },
+  const response = await registerVerified(client, {
+    name: label,
+    email: freshEmail(label),
+    password,
   });
-  assert.equal(response.status, 201);
+  assert.equal(response.status, 200);
   return client;
 }
 

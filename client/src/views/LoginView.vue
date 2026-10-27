@@ -5,7 +5,11 @@ import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
 import BaseInput from "@/components/ui/BaseInput.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
-import { isApiError, type FieldError } from "@/lib/api";
+import {
+  EMAIL_NOT_VERIFIED_CODE,
+  isApiError,
+  type FieldError,
+} from "@/lib/api";
 import { useAuth } from "@/stores/auth";
 
 const route = useRoute();
@@ -42,6 +46,14 @@ async function onSubmit() {
         : "/dashboard";
     await router.push(redirect);
   } catch (error) {
+    if (isApiError(error) && error.code === EMAIL_NOT_VERIFIED_CODE) {
+      await router.push({
+        name: "verify-email",
+        query: { email: form.email.trim() },
+      });
+      return;
+    }
+
     if (isApiError(error)) {
       formError.value = error.message;
       applyFieldErrors(error.fields);

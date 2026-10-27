@@ -6,6 +6,9 @@ withDefaults(
     type?: string;
     autocomplete?: string;
     placeholder?: string;
+    inputmode?: "text" | "numeric" | "decimal" | "email" | "tel" | "url" | "search";
+    maxlength?: number;
+    pattern?: string;
     required?: boolean;
     error?: string;
     disabled?: boolean;
@@ -14,6 +17,9 @@ withDefaults(
     type: "text",
     placeholder: undefined,
     autocomplete: undefined,
+    inputmode: undefined,
+    maxlength: undefined,
+    pattern: undefined,
     required: false,
     error: undefined,
     disabled: false,
@@ -31,6 +37,9 @@ const model = defineModel<string>({ required: true });
       v-model="model"
       :type="type"
       :autocomplete="autocomplete"
+      :inputmode="inputmode"
+      :maxlength="maxlength"
+      :pattern="pattern"
       :placeholder="placeholder"
       :required="required"
       :disabled="disabled"

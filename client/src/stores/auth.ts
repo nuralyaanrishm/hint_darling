@@ -4,9 +4,12 @@ import {
   login as apiLogin,
   logout as apiLogout,
   register as apiRegister,
+  verifyEmail as apiVerifyEmail,
   type AuthUser,
   type LoginPayload,
   type RegisterPayload,
+  type RegisterResult,
+  type VerifyEmailPayload,
 } from "@/lib/api";
 
 // Module-level singletons so every component and the router share one state.
@@ -45,11 +48,15 @@ async function login(payload: LoginPayload): Promise<AuthUser> {
   return authenticated;
 }
 
-async function register(payload: RegisterPayload): Promise<AuthUser> {
-  const created = await apiRegister(payload);
-  user.value = created;
+async function register(payload: RegisterPayload): Promise<RegisterResult> {
+  return apiRegister(payload);
+}
+
+async function verifyEmail(payload: VerifyEmailPayload): Promise<AuthUser> {
+  const verified = await apiVerifyEmail(payload);
+  user.value = verified;
   initialized.value = true;
-  return created;
+  return verified;
 }
 
 async function logout(): Promise<void> {
@@ -68,6 +75,7 @@ export function useAuth() {
     initAuth,
     login,
     register,
+    verifyEmail,
     logout,
   };
 }

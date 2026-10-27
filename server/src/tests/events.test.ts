@@ -4,6 +4,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { prisma } from "../lib/prisma.js";
 import {
   makeRunId,
+  registerVerified,
   startTestServer,
   TestClient,
   type TestHarness,
@@ -40,10 +41,12 @@ function skipWithoutDb(t: TestContext): boolean {
 async function registerUser(label: string): Promise<TestClient> {
   const client = new TestClient(baseUrl);
   await client.ensureCsrf();
-  const response = await client.request("POST", "/api/auth/register", {
-    json: { name: label, email: freshEmail(label), password },
+  const response = await registerVerified(client, {
+    name: label,
+    email: freshEmail(label),
+    password,
   });
-  assert.equal(response.status, 201);
+  assert.equal(response.status, 200);
   return client;
 }
 
@@ -98,6 +101,8 @@ describe("event management", () => {
         eventDate: "2026-06-14",
         description: "Our big day",
         location: "Somerset",
+        latitude: 51.1279,
+        longitude: -3.0026,
       },
     });
 
@@ -105,6 +110,8 @@ describe("event management", () => {
     assert.equal(created.body.event.name, "Emma & James");
     assert.equal(created.body.event.type, "WEDDING");
     assert.equal(created.body.event.location, "Somerset");
+    assert.equal(created.body.event.latitude, 51.1279);
+    assert.equal(created.body.event.longitude, -3.0026);
     assert.ok(created.body.event.eventDate.startsWith("2026-06-14"));
     assert.equal(created.body.event.wishlist, null);
 
@@ -174,6 +181,8 @@ describe("event management", () => {
         eventDate: null,
         description: null,
         location: null,
+        latitude: null,
+        longitude: null,
       },
     });
 
@@ -181,6 +190,43 @@ describe("event management", () => {
     assert.equal(created.body.event.eventDate, null);
     assert.equal(created.body.event.description, null);
     assert.equal(created.body.event.location, null);
+    assert.equal(created.body.event.latitude, null);
+    assert.equal(created.body.event.longitude, null);
+  });
+
+  it("validates map coordinates", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const owner = await registerUser("coordinates");
+
+    const outOfRange = await owner.request("POST", "/api/events", {
+      json: {
+        name: "Bad pin",
+        type: "OTHER",
+        latitude: 91,
+        longitude: 0,
+      },
+    });
+
+    assert.equal(outOfRange.status, 400);
+    const fields = outOfRange.body.error.fields.map(
+      (field: { field: string }) => field.field,
+    );
+    assert.ok(fields.includes("latitude"));
+
+    const unpaired = await owner.request("POST", "/api/events", {
+      json: {
+        name: "Half a pin",
+        type: "OTHER",
+        latitude: 51.5,
+      },
+    });
+
+    assert.equal(unpaired.status, 400);
+    const unpairedFields = unpaired.body.error.fields.map(
+      (field: { field: string }) => field.field,
+    );
+    assert.ok(unpairedFields.includes("longitude"));
   });
 
   it("updates an event it owns", async (t) => {
@@ -190,12 +236,19 @@ describe("event management", () => {
     const id = await createEvent(owner);
 
     const updated = await owner.request("PATCH", `/api/events/${id}`, {
-      json: { name: "Renamed celebration", location: "" },
+      json: {
+        name: "Renamed celebration",
+        location: "",
+        latitude: 52.1,
+        longitude: -1.2,
+      },
     });
 
     assert.equal(updated.status, 200);
     assert.equal(updated.body.event.name, "Renamed celebration");
     assert.equal(updated.body.event.location, null);
+    assert.equal(updated.body.event.latitude, 52.1);
+    assert.equal(updated.body.event.longitude, -1.2);
   });
 
   it("prevents another user from viewing, editing or deleting an event", async (t) => {

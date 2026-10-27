@@ -121,12 +121,39 @@ export interface RegisterPayload {
   password: string;
 }
 
-export async function register(payload: RegisterPayload): Promise<AuthUser> {
-  const data = await request<{ user: AuthUser }>("/auth/register", {
+export interface RegisterResult {
+  message: string;
+  email: string;
+}
+
+/** Creates an unverified account and emails a code; no session is started. */
+export async function register(payload: RegisterPayload): Promise<RegisterResult> {
+  return request<RegisterResult>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface VerifyEmailPayload {
+  email: string;
+  code: string;
+}
+
+/** Confirms the signup code and returns the now signed-in user. */
+export async function verifyEmail(payload: VerifyEmailPayload): Promise<AuthUser> {
+  const data = await request<{ user: AuthUser }>("/auth/verify-email", {
     method: "POST",
     body: JSON.stringify(payload),
   });
   return data.user;
+}
+
+/** Requests a fresh signup code. Always succeeds generically. */
+export async function resendVerification(email: string): Promise<void> {
+  await request<{ message: string }>("/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
 }
 
 export interface LoginPayload {
@@ -149,6 +176,9 @@ export async function logout(): Promise<void> {
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
+
+/** Returned by login when the account exists but the email is not verified yet. */
+export const EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED";
 
 // ---------------------------------------------------------------------------
 // Events and wishlists
@@ -219,6 +249,8 @@ export interface EventSummary {
   eventDate: string | null;
   description: string | null;
   location: string | null;
+  latitude: number | null;
+  longitude: number | null;
   wishlist: WishlistSummary | null;
   createdAt: string;
   updatedAt: string;
@@ -234,6 +266,8 @@ export interface EventInput {
   eventDate?: string | null;
   description?: string | null;
   location?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface WishlistInput {
@@ -391,6 +425,8 @@ export interface PublicWishlist {
     type: EventType;
     eventDate: string | null;
     location: string | null;
+    latitude: number | null;
+    longitude: number | null;
     description: string | null;
   };
   items: PublicGift[];

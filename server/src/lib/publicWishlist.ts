@@ -49,6 +49,8 @@ export interface PublicWishlistDto {
     type: EventType;
     eventDate: string | null;
     location: string | null;
+    latitude: number | null;
+    longitude: number | null;
     description: string | null;
   };
   items: PublicGiftDto[];
@@ -79,6 +81,8 @@ interface PublicWishlistRecord {
     type: EventType;
     eventDate: Date | null;
     location: string | null;
+    latitude: number | null;
+    longitude: number | null;
     description: string | null;
   };
   items: PublicWishlistItemRecord[];
@@ -122,6 +126,8 @@ export function toPublicWishlistDto(
       type: wishlist.event.type,
       eventDate: wishlist.event.eventDate?.toISOString() ?? null,
       location: wishlist.event.location,
+      latitude: wishlist.event.latitude,
+      longitude: wishlist.event.longitude,
       description: wishlist.event.description,
     },
     items: wishlist.items.map(toPublicGiftDto),
@@ -159,6 +165,8 @@ export async function loadPublicWishlist(
           type: true,
           eventDate: true,
           location: true,
+          latitude: true,
+          longitude: true,
           description: true,
         },
       },

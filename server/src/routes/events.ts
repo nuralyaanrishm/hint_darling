@@ -58,6 +58,8 @@ eventsRouter.post("/", async (req, res) => {
       eventDate: data.eventDate ?? null,
       description: data.description ?? null,
       location: data.location ?? null,
+      latitude: data.latitude ?? null,
+      longitude: data.longitude ?? null,
     },
   });
 
@@ -83,6 +85,8 @@ eventsRouter.patch("/:eventId", async (req, res) => {
       eventDate: data.eventDate,
       description: data.description,
       location: data.location,
+      latitude: data.latitude,
+      longitude: data.longitude,
     },
   });
 

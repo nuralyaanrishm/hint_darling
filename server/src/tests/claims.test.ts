@@ -6,6 +6,7 @@ import { prisma } from "../lib/prisma.js";
 import { hashToken } from "../lib/tokens.js";
 import {
   makeRunId,
+  registerVerified,
   startTestServer,
   TestClient,
   type TestHarness,
@@ -61,10 +62,12 @@ async function makeFixture(label: string): Promise<Fixture> {
   const owner = new TestClient(baseUrl);
   await owner.ensureCsrf();
   const ownerEmail = freshEmail(label);
-  const registered = await owner.request("POST", "/api/auth/register", {
-    json: { name: label, email: ownerEmail, password },
+  const registered = await registerVerified(owner, {
+    name: label,
+    email: ownerEmail,
+    password,
   });
-  assert.equal(registered.status, 201);
+  assert.equal(registered.status, 200);
 
   const event = await owner.request("POST", "/api/events", {
     json: { name: "Emma & James", type: "WEDDING" },
@@ -320,13 +323,12 @@ describe("gift claiming", () => {
     // Register a second account to claim as.
     const giver = new TestClient(baseUrl);
     await giver.ensureCsrf();
-    await giver.request("POST", "/api/auth/register", {
-      json: {
-        name: "Secret Account Giver",
-        email: freshEmail("registered-giver"),
-        password,
-      },
+    const giverRegistered = await registerVerified(giver, {
+      name: "Secret Account Giver",
+      email: freshEmail("registered-giver"),
+      password,
     });
+    assert.equal(giverRegistered.status, 200);
 
     const response = await claim(giver, shareToken, itemId, {
       idempotencyKey: "key-registered",
