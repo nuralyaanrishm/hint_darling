@@ -1,10 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
   "installCommand": "npm install",
-  "buildCommand": "npm run db:generate && npm run build -w client && npm run build -w server",
+  "buildCommand": "DIRECT_URL=\"${DIRECT_URL:-${DATABASE_URL_UNPOOLED:-$DATABASE_URL}}\" npm run db:generate && npm run build -w client && npm run build -w server",
   "outputDirectory": "client/dist",
   "functions": {
-    "api/index.ts": { "includeFiles": "client/dist/**" }
+    "api/index.ts": { "includeFiles": "{client/dist/**,server/dist/**}" }
   },
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api" },

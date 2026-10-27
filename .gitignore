@@ -19,6 +19,9 @@ coverage
 .env.*
 !.env.example
 
+# Vercel project link
+.vercel
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

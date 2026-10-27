@@ -35,6 +35,10 @@ const clientIndex = path.join(clientDist, "index.html");
 export function createApp() {
   const app = express();
 
+  // Vercel terminates TLS at its edge and forwards the original protocol and
+  // client IP. Trusting the immediate proxy keeps req.protocol/req.ip correct.
+  app.set("trust proxy", 1);
+
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());

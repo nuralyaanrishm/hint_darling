@@ -10,6 +10,7 @@
     "test": "cross-env NODE_ENV=test node --import tsx --test \"src/tests/*.test.ts\"",
     "type-check": "tsc --noEmit",
     "db:generate": "prisma generate",
+    "db:deploy": "prisma migrate deploy",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio"
