@@ -104,7 +104,7 @@ async function onSubmit() {
             label="Email"
             type="email"
             autocomplete="email"
-            placeholder="you@example.com"
+            placeholder="you@email.com"
             required
             :error="fieldErrors.email"
           />

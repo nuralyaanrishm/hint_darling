@@ -5,12 +5,12 @@ const steps = [
   {
     number: "01",
     title: "Create",
-    text: "Add the gifts you truly want, with prices, notes and links, and arrange them into a wishlist that feels like you.",
+    text: "Add the gifts you truly want and arrange them into a wishlist that feels like you.",
   },
   {
     number: "02",
     title: "Share",
-    text: "Send one beautiful link to friends and family. No accounts, no fuss, just a lovely wishlist to browse.",
+    text: "Send one link or the QR code to your friends and family. No accounts, no fuss, just a lovely wishlist to browse.",
   },
   {
     number: "03",

@@ -5,16 +5,15 @@ import HeartIcon from "@/components/decor/HeartIcon.vue";
 interface PreviewGift {
   name: string;
   detail: string;
-  price: string;
   status: "available" | "claimed";
 }
 
 // Static, illustrative content for the design preview — not live data.
 const gifts: PreviewGift[] = [
-  { name: "Linen duvet set", detail: "Queen · stone", price: "$180", status: "available" },
-  { name: "Stand mixer", detail: "Cream", price: "$349", status: "claimed" },
-  { name: "Honeymoon fund", detail: "Any contribution", price: "$100", status: "available" },
-  { name: "Crystal bud vase", detail: "Set of two", price: "$75", status: "claimed" },
+  { name: "Linen duvet set", detail: "Queen · stone", status: "available" },
+  { name: "Stand mixer", detail: "Cream", status: "claimed" },
+  { name: "Honeymoon fund", detail: "Any contribution", status: "available" },
+  { name: "Crystal bud vase", detail: "Set of two", status: "claimed" },
 ];
 
 const claimed = gifts.filter((gift) => gift.status === "claimed").length;
@@ -31,7 +30,7 @@ const progress = Math.round((claimed / total) * 100);
           A wishlist your guests will adore
         </h2>
         <p class="text-ink/70">
-          Every gift is laid out beautifully with its price and status, so your
+          Every gift is laid out beautifully so your
           loved ones can choose what they'll give, and see what's already taken.
         </p>
       </div>
@@ -104,7 +103,7 @@ const progress = Math.round((claimed / total) * 100);
             </div>
 
             <div class="flex shrink-0 items-center gap-3 sm:gap-5">
-              <span class="text-sm font-medium text-ink">{{ gift.price }}</span>
+             
 
               <span
                 class="hidden rounded-full px-3 py-1 text-xs sm:inline-flex"
