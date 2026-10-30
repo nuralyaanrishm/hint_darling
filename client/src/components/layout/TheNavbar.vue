@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
@@ -15,7 +15,13 @@ const loggingOut = ref(false);
 const links = [
   { label: "How It Works", to: "/#how-it-works" },
   { label: "Occasions", to: "/#occasions" },
+  { label: "Pro", to: "/#pro" },
 ];
+
+const isPro = computed(() => user.value?.plan === "PRO");
+const visibleLinks = computed(() =>
+  isPro.value ? links.filter((link) => link.label !== "Pro") : links,
+);
 
 function closeMenu() {
   menuOpen.value = false;
@@ -65,7 +71,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
       <!-- Desktop navigation -->
       <div class="hidden items-center gap-8 md:flex">
         <RouterLink
-          v-for="link in links"
+          v-for="link in visibleLinks"
           :key="link.to"
           :to="link.to"
           class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
@@ -85,6 +91,20 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
           >
             Me
+          </RouterLink>
+          <RouterLink
+            v-if="isPro"
+            to="/dashboard"
+            class="rounded-full bg-rose/10 px-2.5 py-1 text-xs font-medium text-rose-deep transition-colors hover:bg-rose/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+          >
+            Pro
+          </RouterLink>
+          <RouterLink
+            v-else
+            to="/dashboard"
+            class="rounded-full border border-rose/40 px-2.5 py-1 text-xs font-medium text-rose transition-colors hover:border-rose hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+          >
+            Go Pro
           </RouterLink>
           <button
             type="button"
@@ -153,7 +173,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
     >
       <div class="flex flex-col gap-1">
         <RouterLink
-          v-for="link in links"
+          v-for="link in visibleLinks"
           :key="link.to"
           :to="link.to"
           class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
@@ -173,6 +193,20 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
           >
             Me
+          </RouterLink>
+          <RouterLink
+            v-if="isPro"
+            to="/dashboard"
+            class="mx-3 w-fit rounded-full bg-rose/10 px-2.5 py-1 text-xs font-medium text-rose-deep transition-colors hover:bg-rose/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
+          >
+            Pro
+          </RouterLink>
+          <RouterLink
+            v-else
+            to="/dashboard"
+            class="mx-3 w-fit rounded-full border border-rose/40 px-2.5 py-1 text-xs font-medium text-rose transition-colors hover:border-rose hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
+          >
+            Go Pro
           </RouterLink>
           <button
             type="button"

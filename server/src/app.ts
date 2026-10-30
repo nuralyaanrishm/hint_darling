@@ -16,10 +16,12 @@ import {
   issueCsrfToken,
 } from "./middleware/auth.js";
 import { authRouter } from "./routes/auth.js";
+import { billingRouter } from "./routes/billing.js";
 import { claimsRouter } from "./routes/claims.js";
 import { eventsRouter } from "./routes/events.js";
 import { healthRouter } from "./routes/health.js";
 import { publicRouter } from "./routes/public.js";
+import { toyyibpayRouter } from "./routes/toyyibpay.js";
 import { wishlistsRouter } from "./routes/wishlists.js";
 
 // The built client, when it exists, is served by this app in production so the
@@ -41,6 +43,11 @@ export function createApp() {
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
+
+  // ToyyibPay posts urlencoded callbacks and cannot send a CSRF token, so this
+  // router must run before cookie parsing and CSRF enforcement.
+  app.use("/api/public/toyyibpay", toyyibpayRouter);
+
   app.use(cookieParser());
 
   // Issue a CSRF token to every visitor, resolve any existing session, then
@@ -54,6 +61,8 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api/events", eventsRouter);
   app.use("/api/wishlists", wishlistsRouter);
+  // One-time Pro unlock and billing status (signed-in only).
+  app.use("/api/billing", billingRouter);
   // A gift-giver's own reservations (signed-in only).
   app.use("/api/claims", claimsRouter);
   // Guest-facing, read-only endpoints. No session required.

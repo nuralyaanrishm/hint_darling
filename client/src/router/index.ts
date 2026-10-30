@@ -8,6 +8,7 @@ import VerifyEmailView from "@/views/VerifyEmailView.vue";
 import DashboardView from "@/views/DashboardView.vue";
 import EventFormView from "@/views/EventFormView.vue";
 import EventDetailView from "@/views/EventDetailView.vue";
+import BillingReturnView from "@/views/BillingReturnView.vue";
 import PublicWishlistView from "@/views/PublicWishlistView.vue";
 import ClaimManageView from "@/views/ClaimManageView.vue";
 import MyClaimsView from "@/views/MyClaimsView.vue";
@@ -114,6 +115,15 @@ const router = createRouter({
       meta: {
         title: "Manage your gift",
         description: "View or release a gift you claimed.",
+      },
+    },
+    {
+      path: "/billing/return",
+      name: "billing-return",
+      component: BillingReturnView,
+      meta: {
+        title: "Payment",
+        requiresAuth: true,
       },
     },
     {

@@ -21,6 +21,9 @@ const dateLabel = computed(() => {
 });
 
 const itemCount = computed(() => props.event.wishlist?.itemCount ?? 0);
+const claimsLocked = computed(
+  () => props.event.wishlist?.claimsLocked ?? false,
+);
 const claimedCount = computed(() => props.event.wishlist?.claimedCount ?? 0);
 const claimPercent = computed(() => {
   if (itemCount.value === 0) return 0;
@@ -55,7 +58,7 @@ const claimPercent = computed(() => {
       </div>
     </dl>
 
-    <template v-if="event.wishlist && itemCount > 0">
+    <template v-if="event.wishlist && itemCount > 0 && !claimsLocked">
       <div
         class="mt-4 flex items-start gap-2.5 rounded-2xl px-3.5 py-2.5 text-sm"
         :class="

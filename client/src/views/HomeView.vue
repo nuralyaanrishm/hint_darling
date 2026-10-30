@@ -3,6 +3,7 @@ import HeroSection from "@/components/landing/HeroSection.vue";
 import WishlistPreview from "@/components/landing/WishlistPreview.vue";
 import HowItWorks from "@/components/landing/HowItWorks.vue";
 import OccasionsSection from "@/components/landing/OccasionsSection.vue";
+import ProSection from "@/components/landing/ProSection.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
 </script>
@@ -19,6 +20,8 @@ import BaseButton from "@/components/ui/BaseButton.vue";
   <HowItWorks />
 
   <OccasionsSection />
+
+  <ProSection />
 
   <!-- Closing call to action -->
   <!--<section class="relative overflow-hidden">

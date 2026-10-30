@@ -129,6 +129,14 @@ async function claimAsGiver(
   );
 }
 
+/** Upgrades a fixture's owner in the database so claim insights are unlocked. */
+async function makePro(ownerEmail: string): Promise<void> {
+  await prisma.user.update({
+    where: { email: ownerEmail.toLowerCase() },
+    data: { proUnlockedAt: new Date() },
+  });
+}
+
 before(async () => {
   harness = await startTestServer();
   baseUrl = harness.baseUrl;
@@ -150,7 +158,7 @@ after(async () => {
 // ---------------------------------------------------------------------------
 
 describe("owner claim-status dashboard", () => {
-  it("shows claimed/available status but never the gift-giver's identity", async (t) => {
+  it("locks claim insights for a free owner but never leaks identity", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const { owner, giver, eventId, wishlistId, shareToken, itemA, itemB, giverName } =
@@ -166,12 +174,18 @@ describe("owner claim-status dashboard", () => {
     const toaster = before.find((item: any) => item.id === itemB);
     assert.equal(toaster.isClaimed, false);
     assert.equal(toaster.claimedCount, 0);
+    assert.equal(toaster.claimsLocked, true);
 
     const detail = await owner.request("GET", `/api/events/${eventId}`);
     const items = detail.body.event.wishlist.items as any[];
     const airFryer = items.find((item: any) => item.id === itemA);
-    assert.equal(airFryer.isClaimed, true, "owner sees the item is claimed");
-    assert.equal(airFryer.claimedCount, 1);
+    assert.equal(
+      airFryer.isClaimed,
+      false,
+      "free owners do not see claim status",
+    );
+    assert.equal(airFryer.claimedCount, 0);
+    assert.equal(airFryer.claimsLocked, true);
 
     const serialised = JSON.stringify(detail.body);
     assert.equal(serialised.includes("Auntie Rose"), false, "claimant name leaked");
@@ -186,18 +200,63 @@ describe("owner claim-status dashboard", () => {
     const wishlistItem = (wishlist.body.wishlist.items as any[]).find(
       (item: any) => item.id === itemA,
     );
-    assert.equal(wishlistItem.isClaimed, true);
+    assert.equal(wishlistItem.isClaimed, false);
+    assert.equal(wishlistItem.claimsLocked, true);
     assert.equal(wishlist.body.wishlist.privacyMode, "LINK_ONLY");
     assert.equal(JSON.stringify(wishlist.body).includes("Auntie Rose"), false);
 
-    // The dashboard events list reports claimed counts, privately.
+    // The dashboard events list withholds the claimed count too.
     const events = await owner.request("GET", "/api/events");
     const summary = (events.body.events as any[]).find(
       (entry: any) => entry.id === eventId,
     );
     assert.equal(summary.wishlist.itemCount, 2);
-    assert.equal(summary.wishlist.claimedCount, 1);
+    assert.equal(summary.wishlist.claimedCount, 0);
+    assert.equal(summary.wishlist.claimsLocked, true);
     assert.equal(JSON.stringify(events.body).includes("Auntie Rose"), false);
+  });
+
+  it("shows claim counts to a Pro owner without leaking identity", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const { owner, giver, eventId, wishlistId, shareToken, itemA, itemB, ownerEmail } =
+      await makeFixture("pro-owner");
+
+    const claimed = await claimAsGiver(giver, shareToken, itemA, "pro-key");
+    assert.equal(claimed.status, 201);
+    await makePro(ownerEmail);
+
+    const event = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(event.status, 200);
+    const items = event.body.event.wishlist.items as any[];
+    const airFryer = items.find((item: any) => item.id === itemA);
+    const toaster = items.find((item: any) => item.id === itemB);
+    assert.equal(event.body.event.wishlist.claimsLocked, false);
+    assert.equal(airFryer.isClaimed, true);
+    assert.equal(airFryer.claimedCount, 1);
+    assert.equal(airFryer.claimsLocked, false);
+    assert.equal(toaster.isClaimed, false);
+    assert.equal(toaster.claimedCount, 0);
+
+    const wishlist = await owner.request("GET", `/api/wishlists/${wishlistId}`);
+    assert.equal(wishlist.status, 200);
+    assert.equal(wishlist.body.wishlist.claimsLocked, false);
+    const wishlistItem = (wishlist.body.wishlist.items as any[]).find(
+      (item: any) => item.id === itemA,
+    );
+    assert.equal(wishlistItem.isClaimed, true);
+    assert.equal(wishlistItem.claimedCount, 1);
+
+    const events = await owner.request("GET", "/api/events");
+    const summary = (events.body.events as any[]).find(
+      (entry: any) => entry.id === eventId,
+    );
+    assert.equal(summary.wishlist.claimedCount, 1);
+    assert.equal(summary.wishlist.claimsLocked, false);
+
+    const serialised = JSON.stringify({ event: event.body, events: events.body });
+    assert.equal(serialised.includes("Auntie Rose"), false, "claimant name leaked");
+    assert.equal(serialised.includes("claimantName"), false);
   });
 
   it("marks a newly created item as available", async (t) => {
@@ -210,6 +269,7 @@ describe("owner claim-status dashboard", () => {
     assert.equal(item.status, 201);
     assert.equal(item.body.item.isClaimed, false);
     assert.equal(item.body.item.claimedCount, 0);
+    assert.equal(item.body.item.claimsLocked, true);
   });
 });
 
@@ -283,12 +343,17 @@ describe("signed-in gift-giver", () => {
   it("can release their own reservation, which frees the gift", async (t) => {
     if (skipWithoutDb(t)) return;
 
-    const { owner, giver, shareToken, itemA } = await makeFixture("release");
+    const { owner, giver, shareToken, itemA, ownerEmail } =
+      await makeFixture("release");
+    await makePro(ownerEmail);
 
     const claimed = await claimAsGiver(giver, shareToken, itemA, "release-key");
     assert.equal(claimed.status, 201);
     const mine = await giver.request("GET", "/api/claims");
     const claimId = mine.body.claims[0].id as string;
+
+    const beforeRelease = await owner.request("GET", "/api/events");
+    assert.equal(beforeRelease.body.events[0].wishlist.claimedCount, 1);
 
     const cancelled = await giver.request(
       "POST",

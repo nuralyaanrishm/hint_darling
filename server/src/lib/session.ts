@@ -87,6 +87,7 @@ export interface ValidSession {
     name: string;
     email: string;
     createdAt: Date;
+    proUnlockedAt: Date | null;
   };
 }
 
@@ -101,7 +102,13 @@ export async function findValidSession(
     where: { tokenHash: hashToken(rawToken) },
     include: {
       user: {
-        select: { id: true, name: true, email: true, createdAt: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          createdAt: true,
+          proUnlockedAt: true,
+        },
       },
     },
   });

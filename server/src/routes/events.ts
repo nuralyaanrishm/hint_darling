@@ -1,11 +1,14 @@
 import { Router } from "express";
+import type { Request } from "express";
 import { HttpError } from "../lib/errors.js";
 import { getOwnedEvent, getOwnedWishlist } from "../lib/ownership.js";
+import { isProUser } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   toEventDto,
   toEventSummaryDto,
   toWishlistDto,
+  type OwnerViewer,
 } from "../lib/serializers.js";
 import { generateToken } from "../lib/tokens.js";
 import {
@@ -18,6 +21,12 @@ import {
 import { currentUserId, requireAuth } from "../middleware/auth.js";
 
 export const eventsRouter = Router();
+
+// Claim insights are a Pro feature; the serializer uses this to decide whether
+// claimed counts and per-item claim status are included in owner responses.
+function ownerViewer(req: Request): OwnerViewer {
+  return { isPro: isProUser(req.auth?.user) };
+}
 
 // Every event route requires a signed-in owner.
 eventsRouter.use(requireAuth);
@@ -43,7 +52,9 @@ eventsRouter.get("/", async (req, res) => {
     },
   });
 
-  res.json({ events: events.map(toEventSummaryDto) });
+  res.json({
+    events: events.map((event) => toEventSummaryDto(event, ownerViewer(req))),
+  });
 });
 
 // POST /api/events — create an event.
@@ -63,13 +74,13 @@ eventsRouter.post("/", async (req, res) => {
     },
   });
 
-  res.status(201).json({ event: toEventDto({ ...event, wishlist: null }) });
+  res.status(201).json({ event: toEventDto({ ...event, wishlist: null }, ownerViewer(req)) });
 });
 
 // GET /api/events/:eventId — event detail with its wishlist and items.
 eventsRouter.get("/:eventId", async (req, res) => {
   const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
-  res.json({ event: toEventDto(event) });
+  res.json({ event: toEventDto(event, ownerViewer(req)) });
 });
 
 // PATCH /api/events/:eventId — update an event.
@@ -91,7 +102,7 @@ eventsRouter.patch("/:eventId", async (req, res) => {
   });
 
   const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
-  res.json({ event: toEventDto(event) });
+  res.json({ event: toEventDto(event, ownerViewer(req)) });
 });
 
 // DELETE /api/events/:eventId — delete an event (cascades to wishlist/items).
@@ -122,7 +133,7 @@ eventsRouter.post("/:eventId/wishlist", async (req, res) => {
     include: { items: true },
   });
 
-  res.status(201).json({ wishlist: toWishlistDto(wishlist) });
+  res.status(201).json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
 });
 
 // PATCH /api/events/:eventId/wishlist — update title/description.
@@ -145,5 +156,5 @@ eventsRouter.patch("/:eventId/wishlist", async (req, res) => {
   });
 
   const wishlist = await getOwnedWishlist(currentUserId(req), event.wishlist.id);
-  res.json({ wishlist: toWishlistDto(wishlist) });
+  res.json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
 });

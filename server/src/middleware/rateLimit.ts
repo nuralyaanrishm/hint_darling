@@ -88,6 +88,22 @@ export const publicReadLimiter = rateLimit({
 });
 
 /**
+ * Limits one-time Pro checkout and reconciliation calls. These hit ToyyibPay
+ * and are deliberate, occasional actions.
+ */
+export const billingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isTest ? 10_000 : 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res
+      .status(429)
+      .json(jsonHandler("Too many payment attempts. Please try again later."));
+  },
+});
+
+/**
  * Limits claim creation and claim management calls. Claiming is a deliberate,
  * occasional action, so a low cap blunts token probing and automation without
  * affecting normal guests.

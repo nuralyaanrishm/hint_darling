@@ -51,6 +51,8 @@ model User {
   /// Set once the signup OTP is confirmed or Google proves the address. Unverified
   /// accounts cannot sign in with a password.
   emailVerifiedAt DateTime?
+  /// Set when the account buys the one-time Pro unlock. Null means the free plan.
+  proUnlockedAt   DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -58,6 +60,7 @@ model User {
   sessions           Session[]
   claims             GiftClaim[]
   emailVerifications EmailVerification[]
+  purchases          Purchase[]
 
   @@map("users")
 }
@@ -192,4 +195,37 @@ model GiftClaim {
   @@index([wishlistItemId])
   @@index([claimantUserId])
   @@map("gift_claims")
+}
+
+/// Lifecycle of a one-time Pro unlock purchase.
+enum PurchaseStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+/// A one-time ToyyibPay purchase that unlocks unlimited wishlist items.
+/// The raw ToyyibPay callback is kept for auditing and idempotent replay.
+model Purchase {
+  id                String         @id @default(cuid())
+  userId            String
+  status            PurchaseStatus @default(PENDING)
+  /// Price in sen (RM1.00 = 100). Never accepted from the client.
+  amountSen         Int            @default(100)
+  currency          String         @default("MYR") @db.VarChar(3)
+  /// Opaque reference sent to ToyyibPay as billExternalReferenceNo.
+  externalReference String         @unique
+  billCode          String?        @unique
+  refno             String?        @unique
+  transactionId     String?
+  paymentChannel    String?
+  paidAt            DateTime?
+  rawCallback       Json?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("purchases")
 }

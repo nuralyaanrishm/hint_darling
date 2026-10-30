@@ -16,7 +16,17 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  plan: "FREE" | "PRO";
+  proUnlockedAt: string | null;
   createdAt: string;
+}
+
+export interface BillingSummary {
+  plan: "FREE" | "PRO";
+  proUnlockedAt: string | null;
+  freeItemLimit: number;
+  priceSen: number;
+  currency: string;
 }
 
 export interface FieldError {
@@ -156,6 +166,30 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
+/** The caller's plan, free item limit and one-time unlock price. */
+export async function getBilling(): Promise<BillingSummary> {
+  const data = await request<{ billing: BillingSummary }>("/billing");
+  return data.billing;
+}
+
+/** Starts a one-time RM1 ToyyibPay checkout and returns its hosted URL. */
+export async function createUnlockCheckout(): Promise<{ paymentUrl: string }> {
+  return request<{ paymentUrl: string }>("/billing/unlock", {
+    method: "POST",
+  });
+}
+
+/** Checks any pending ToyyibPay bill for a missed callback. */
+export async function reconcilePurchase(): Promise<{
+  billing: BillingSummary;
+  reconciled: boolean;
+}> {
+  return request<{ billing: BillingSummary; reconciled: boolean }>(
+    "/billing/reconcile",
+    { method: "POST" },
+  );
+}
+
 export interface RegisterPayload {
   name: string;
   email: string;
@@ -258,6 +292,8 @@ export interface WishlistItemDto {
   isClaimed: boolean;
   /** Number of active claims on this gift. At most one in this version. */
   claimedCount: number;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -270,6 +306,8 @@ export interface WishlistDto {
   shareToken: string;
   privacyMode: PrivacyMode;
   isActive: boolean;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
   items: WishlistItemDto[];
   createdAt: string;
   updatedAt: string;
@@ -279,8 +317,10 @@ export interface WishlistSummary {
   id: string;
   title: string;
   itemCount: number;
-  /** How many gifts on the list are currently reserved. Never reveals who. */
+  /** How many gifts are currently reserved (zero for Free owners). Never reveals who. */
   claimedCount: number;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
 }
 
 export interface EventSummary {

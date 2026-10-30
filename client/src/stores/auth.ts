@@ -41,6 +41,19 @@ function initAuth(): Promise<void> {
   return initPromise;
 }
 
+/** Re-reads the signed-in user, e.g. after a successful Pro purchase. */
+async function refreshUser(): Promise<AuthUser | null> {
+  try {
+    user.value = await getCurrentUser();
+  } catch {
+    user.value = null;
+  } finally {
+    initialized.value = true;
+  }
+
+  return user.value;
+}
+
 async function login(payload: LoginPayload): Promise<AuthUser> {
   const authenticated = await apiLogin(payload);
   user.value = authenticated;
@@ -73,6 +86,7 @@ export function useAuth() {
     initialized: readonly(initialized),
     isAuthenticated,
     initAuth,
+    refreshUser,
     login,
     register,
     verifyEmail,

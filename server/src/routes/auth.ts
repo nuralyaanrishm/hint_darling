@@ -23,6 +23,7 @@ import {
   type GoogleProfile,
 } from "../lib/googleOAuth.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
+import { isProUser } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   SESSION_COOKIE,
@@ -60,6 +61,8 @@ interface PublicUser {
   id: string;
   name: string;
   email: string;
+  plan: "FREE" | "PRO";
+  proUnlockedAt: string | null;
   createdAt: string;
 }
 
@@ -67,12 +70,15 @@ function toPublicUser(user: {
   id: string;
   name: string;
   email: string;
+  proUnlockedAt: Date | null;
   createdAt: Date;
 }): PublicUser {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
+    plan: isProUser(user) ? "PRO" : "FREE",
+    proUnlockedAt: user.proUnlockedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
   };
 }

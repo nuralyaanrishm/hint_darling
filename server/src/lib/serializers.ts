@@ -4,6 +4,16 @@ import type { EventType, PrivacyMode } from "@prisma/client";
 // Decimal prices become strings (so the client never receives a JS number it
 // might round). Structural types keep these usable with any include/select.
 
+/**
+ * Owner-facing serializers need to know the viewer's plan because claim
+ * insights are a Pro feature. Free owners still receive their items, but the
+ * serializer withholds claim counts and status so the client can show an
+ * "unlock Pro" prompt instead.
+ */
+export interface OwnerViewer {
+  isPro: boolean;
+}
+
 interface ItemRecord {
   id: string;
   name: string;
@@ -70,14 +80,21 @@ export interface WishlistItemDto {
   isClaimed: boolean;
   /** Number of active claims. At most one in this version. */
   claimedCount: number;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-export function toWishlistItemDto(item: ItemRecord): WishlistItemDto {
+export function toWishlistItemDto(
+  item: ItemRecord,
+  viewer: OwnerViewer,
+): WishlistItemDto {
   // Only active claim ids are ever selected for owner views; the claimant's
-  // identity (name, user id, token) is never loaded or serialised.
-  const claimedCount = item.claims?.length ?? 0;
+  // identity (name, user id, token) is never loaded or serialised. Free owners
+  // are not told about claims at all until they unlock Pro.
+  const claimsLocked = !viewer.isPro;
+  const claimedCount = claimsLocked ? 0 : (item.claims?.length ?? 0);
 
   return {
     id: item.id,
@@ -95,6 +112,7 @@ export function toWishlistItemDto(item: ItemRecord): WishlistItemDto {
     position: item.position,
     isClaimed: claimedCount > 0,
     claimedCount,
+    claimsLocked,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
@@ -109,6 +127,8 @@ export interface WishlistDto {
   shareToken: string;
   privacyMode: PrivacyMode;
   isActive: boolean;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
   items: WishlistItemDto[];
   createdAt: string;
   updatedAt: string;
@@ -116,6 +136,7 @@ export interface WishlistDto {
 
 export function toWishlistDto(
   wishlist: WishlistRecord & { items: ItemRecord[] },
+  viewer: OwnerViewer,
 ): WishlistDto {
   return {
     id: wishlist.id,
@@ -125,7 +146,8 @@ export function toWishlistDto(
     shareToken: wishlist.shareToken,
     privacyMode: wishlist.privacyMode,
     isActive: wishlist.isActive,
-    items: wishlist.items.map(toWishlistItemDto),
+    claimsLocked: !viewer.isPro,
+    items: wishlist.items.map((item) => toWishlistItemDto(item, viewer)),
     createdAt: wishlist.createdAt.toISOString(),
     updatedAt: wishlist.updatedAt.toISOString(),
   };
@@ -135,8 +157,10 @@ export interface WishlistSummaryDto {
   id: string;
   title: string;
   itemCount: number;
-  /** How many gifts on this list are currently reserved. Never reveals who. */
+  /** How many gifts are currently reserved (zero for Free owners). Never reveals who. */
   claimedCount: number;
+  /** True when the owner's plan doesn't include claim insights. */
+  claimsLocked: boolean;
 }
 
 export interface EventSummaryDto {
@@ -163,6 +187,7 @@ export function toEventSummaryDto(
       items?: { id: string }[];
     } | null;
   },
+  viewer: OwnerViewer,
 ): EventSummaryDto {
   return {
     id: event.id,
@@ -178,7 +203,10 @@ export function toEventSummaryDto(
           id: event.wishlist.id,
           title: event.wishlist.title,
           itemCount: event.wishlist._count.items,
-          claimedCount: event.wishlist.items?.length ?? 0,
+          claimedCount: viewer.isPro
+            ? (event.wishlist.items?.length ?? 0)
+            : 0,
+          claimsLocked: !viewer.isPro,
         }
       : null,
     createdAt: event.createdAt.toISOString(),
@@ -194,6 +222,7 @@ export function toEventDto(
   event: EventRecord & {
     wishlist: (WishlistRecord & { items: ItemRecord[] }) | null;
   },
+  viewer: OwnerViewer,
 ): EventDto {
   return {
     id: event.id,
@@ -204,7 +233,7 @@ export function toEventDto(
     location: event.location,
     latitude: event.latitude,
     longitude: event.longitude,
-    wishlist: event.wishlist ? toWishlistDto(event.wishlist) : null,
+    wishlist: event.wishlist ? toWishlistDto(event.wishlist, viewer) : null,
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString(),
   };

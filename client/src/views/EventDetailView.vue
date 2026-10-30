@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
+import UnlockDialog from "@/components/billing/UnlockDialog.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
 import GiftIcon from "@/components/decor/GiftIcon.vue";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
@@ -18,20 +19,24 @@ import {
   createWishlist,
   deleteEvent,
   deleteWishlistItem,
+  getBilling,
   getEvent,
   isApiError,
   reorderWishlistItems,
   updateWishlist,
   updateWishlistItem,
+  type BillingSummary,
   type EventDetail,
   type FieldError,
   type WishlistInput,
   type WishlistItemDto,
   type WishlistItemInput,
 } from "@/lib/api";
+import { useAuth } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
+const { user } = useAuth();
 
 const eventId = computed(() =>
   typeof route.params.id === "string" ? route.params.id : "",
@@ -44,7 +49,14 @@ const pageError = ref<string | null>(null);
 
 const wishlist = computed(() => event.value?.wishlist ?? null);
 
+const billing = ref<BillingSummary | null>(null);
+const isPro = computed(() => user.value?.plan === "PRO");
+const freeItemLimit = computed(() => billing.value?.freeItemLimit ?? 5);
+const atFreeLimit = computed(
+  () => !isPro.value && (wishlist.value?.items.length ?? 0) >= freeItemLimit.value,
+);
 
+const unlockOpen = ref(false);
 
 const dateLabel = computed(() => {
   const value = event.value?.eventDate;
@@ -63,6 +75,10 @@ const claimSummary = computed(() => {
   return { total, claimed, available: total - claimed };
 });
 
+// The server withholds claim status for free owners, so the whole claim summary
+// is replaced with an unlock prompt instead of showing misleading zeroes.
+const claimsLocked = computed(() => wishlist.value?.claimsLocked ?? false);
+
 const claimPercent = computed(() => {
   const { total, claimed } = claimSummary.value;
   if (total === 0) return 0;
@@ -75,6 +91,14 @@ function toFieldErrors(fields: FieldError[]): Record<string, string> {
 
 function redirectToLogin() {
   void router.push({ name: "login", query: { redirect: route.fullPath } });
+}
+
+async function loadBilling() {
+  try {
+    billing.value = await getBilling();
+  } catch {
+    // The plan banner is a nicety; the API still enforces the limit.
+  }
 }
 
 async function load() {
@@ -214,6 +238,14 @@ function openAddItem() {
   itemModalOpen.value = true;
 }
 
+function openAddItemOrUnlock() {
+  if (atFreeLimit.value) {
+    unlockOpen.value = true;
+    return;
+  }
+  openAddItem();
+}
+
 function openEditItem(item: WishlistItemDto) {
   itemMode.value = "edit";
   editingItem.value = item;
@@ -241,6 +273,11 @@ async function onSaveItem(payload: WishlistItemInput) {
     if (isApiError(error)) {
       if (error.status === 401) {
         redirectToLogin();
+        return;
+      }
+      if (error.code === "ITEM_LIMIT_REACHED") {
+        itemModalOpen.value = false;
+        unlockOpen.value = true;
         return;
       }
       itemFormError.value = error.message;
@@ -326,7 +363,10 @@ async function moveItem(index: number, direction: -1 | 1) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadBilling();
+});
 watch(
   () => route.params.id,
   () => {
@@ -445,6 +485,11 @@ watch(
               <p class="mt-3 text-sm text-ink/60">
                 {{ wishlist.items.length }}
                 {{ wishlist.items.length === 1 ? "gift" : "gifts" }}
+                <span v-if="isPro" class="text-ink/45"> · Pro, unlimited</span>
+                <span v-else class="text-ink/45">
+                  · {{ wishlist.items.length }} / {{ freeItemLimit }} on Free
+                  plan
+                </span>
               </p>
             </div>
 
@@ -456,10 +501,30 @@ watch(
               >
                 Edit wishlist
               </BaseButton>
-              <BaseButton size="sm" @click="openAddItem">Add gift</BaseButton>
+              <BaseButton size="sm" @click="openAddItemOrUnlock">
+                {{ atFreeLimit ? "Unlock Pro" : "Add gift" }}
+              </BaseButton>
             </div>
           </div>
         </BaseCard>
+
+        <div
+          v-if="atFreeLimit"
+          class="mt-6 flex flex-col gap-4 rounded-2xl border border-rose/30 bg-blush/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p class="text-sm font-medium text-ink">
+              You've used all {{ freeItemLimit }} free gifts on this wishlist.
+            </p>
+            <p class="mt-1 text-sm text-ink/65">
+              Unlock unlimited gifts for this wishlist and every future one —
+              one payment, yours forever.
+            </p>
+          </div>
+          <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
+            Unlock Pro for RM1
+          </BaseButton>
+        </div>
 
         <div
           v-if="wishlist.isActive && wishlist.privacyMode !== 'PRIVATE'"
@@ -480,9 +545,9 @@ watch(
           <span class="font-medium text-ink">Public</span>.
         </div>
 
-        <!-- Claim status summary -->
+        <!-- Claim status summary (Pro) -->
         <div
-          v-if="wishlist.items.length > 0"
+          v-if="wishlist.items.length > 0 && !claimsLocked"
           class="mt-8 overflow-hidden rounded-3xl border border-blush bg-white/80 shadow-soft"
         >
           <div class="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:px-8">
@@ -540,6 +605,49 @@ watch(
           </div>
         </div>
 
+        <!-- Claim insights are a Pro feature -->
+        <div
+          v-else-if="wishlist.items.length > 0"
+          class="mt-8 flex flex-col gap-4 rounded-3xl border border-blush bg-cream px-6 py-5 shadow-soft sm:flex-row sm:items-center sm:justify-between sm:px-8"
+        >
+          <div class="flex items-start gap-3.5">
+            <span
+              class="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose/15 text-rose-deep"
+              aria-hidden="true"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="4" y="10" width="16" height="10" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            <div>
+              <p class="text-xs uppercase tracking-[0.25em] text-rose">
+                Gift status
+              </p>
+              <p class="mt-1 font-display text-2xl text-ink">
+                Unlock Pro to see how many gifts are claimed
+              </p>
+              <p class="mt-1 text-sm text-ink/65">
+                Claim tracking is part of Pro. Unlock once for RM1 to see
+                which of your gifts have been reserved — you'll never see who
+                claimed them.
+              </p>
+            </div>
+          </div>
+          <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
+            Unlock Pro for RM1
+          </BaseButton>
+        </div>
+
         <div class="mt-8">
           <EmptyState
             v-if="wishlist.items.length === 0"
@@ -559,6 +667,7 @@ watch(
             <li v-for="(item, index) in wishlist.items" :key="item.id">
               <WishlistItemCard
                 :item="item"
+                :claims-locked="claimsLocked"
                 :is-first="index === 0"
                 :is-last="index === wishlist.items.length - 1"
                 @edit="openEditItem(item)"
@@ -571,6 +680,11 @@ watch(
         </div>
       </template>
     </template>
+
+    <UnlockDialog
+      v-model="unlockOpen"
+      :price-sen="billing?.priceSen ?? 100"
+    />
 
     <WishlistForm
       v-model="wishlistModalOpen"

@@ -8,11 +8,11 @@ thing twice.
 > This repository contains the **project foundation**, **secure cookie-based
 > authentication**, **event and wishlist management**, **public wishlist
 > viewing and sharing**, **guest gift-claiming**, and the **owner-facing claim
-> status dashboard + gift-giver view**. Registration, login, logout, session
+> status dashboard (Pro) + gift-giver view**. Registration, login, logout, session
 > handling, events, wishlists, public guest viewing and claiming (with
 > cancellation and concurrency-safe reservations), privacy modes, the owner's
-> private claim dashboard and a gift-giver's own-reservations page are all
-> implemented.
+> private claim dashboard (unlocked with the one-time RM1 Pro purchase) and a
+> gift-giver's own-reservations page are all implemented.
 
 ## Tech stack
 
@@ -104,10 +104,12 @@ The client ships a small coquette-inspired design system and a landing page.
     gift-giver's **own reservations** page — a list of the gifts they've
     promised to give, with a release action. It only ever shows the caller's
     claims.
-  - The event page doubles as the **owner's claim-status dashboard**: each gift
-    shows *claimed* or *available*, the owner sees a friendly summary such as
-    "Someone's getting you 3 of 5! 🎁", and the main dashboard shows a private
-    claimed-count per event. The owner can never see who claimed a gift.
+  - The event page doubles as the **owner's claim-status dashboard**, a **Pro**
+    feature: Pro owners see each gift as *claimed* or *available*, a friendly
+    summary such as "Someone's getting you 3 of 5! 🎁", and a claimed-count per
+    event on the main dashboard. Free owners instead see an "unlock Pro to view
+    claimed gifts" prompt until they make the one-time RM1 purchase. The owner
+    can never see who claimed a gift.
   - The remaining routes show an honest "coming soon" placeholder.
 - **Sharing**: owners get a share panel on the event page (copy link, native
   share, WhatsApp, QR code). The same panel appears for guests on the public
@@ -348,20 +350,25 @@ views (`GET /api/events`, `GET /api/events/:id`, `GET /api/wishlists/:id`) and
 the public projection only ever `select` active claim **ids** (plus a count), so
 `claimantName`, `claimantUserId` and `claimTokenHash` are never even loaded for
 them. The response schemas then surface a simple `isClaimed` / `claimedCount`
-and nothing more. The only response that can contain a name is a claimant's own
-(`GET /api/claims` and `GET /api/public/claims/:token`), and those are scoped to
-that single gift-giver.
+(plus `claimsLocked`) and nothing more. For a Free owner, claim insights are
+withheld entirely: `claimsLocked` is `true` and the counts/statuses are zeroed
+until the account is upgraded to Pro. The only response that can contain a name
+is a claimant's own (`GET /api/claims` and `GET /api/public/claims/:token`), and
+those are scoped to that single gift-giver.
 
-### Owner claim-status dashboard
+### Owner claim-status dashboard (Pro)
 
 The owner's event page and dashboard summarise reservations without ever
-revealing who is behind them:
+revealing who is behind them. Claim insights are part of the one-time Pro
+unlock; free owners are shown an "unlock Pro to see how many gifts are claimed"
+prompt, and the API withholds claim status from their responses.
 
 - each gift card shows a warm **Claimed — someone's getting you this gift! 🎁**
-  or **Available** state with a subtle gift icon;
+  or **Available** state with a subtle gift icon (Pro owners only);
 - the event page shows a progress summary ("Someone's getting you 3 of 5! 🎁")
-  and a claimed-count meter;
-- the events list shows a private "2 of 5 gifts claimed" line per event.
+  and a claimed-count meter (Pro owners only);
+- the events list shows a private "2 of 5 gifts claimed" line per event (Pro
+  owners only).
 
 ### Gift-giver view
 
@@ -486,6 +493,24 @@ These require a session and are always scoped to the caller's own claims:
 | ------ | ----------------------------- | -------------------------------------------------- |
 | `GET`  | `/api/claims`                 | List the caller's own claims (never anyone else's). |
 | `POST` | `/api/claims/:claimId/cancel` | Release one of the caller's own claims.             |
+
+### One-time Pro unlock
+
+Free accounts can add **5 gifts per wishlist**. A one-time **RM1** ToyyibPay
+purchase unlocks unlimited gifts for the account forever (no subscription or
+renewal). The price, free limit and plan rules live in
+`server/src/lib/plans.ts`.
+
+| Method | Path                                   | Description                                            |
+| ------ | -------------------------------------- | ------------------------------------------------------ |
+| `GET`  | `/api/billing`                         | Current plan, free limit and unlock price.             |
+| `POST` | `/api/billing/unlock`                  | Create a fixed RM1 ToyyibPay bill and return its URL.  |
+| `POST` | `/api/billing/reconcile`               | Re-check a pending bill when a callback was missed.    |
+| `POST` | `/api/public/toyyibpay/callback`       | ToyyibPay server callback (MD5 checksum, no CSRF).     |
+
+ToyyibPay credentials and public callback/return URLs are configured with the
+`TOYYIBPAY_*` variables in `server/.env.example`. Callbacks cannot reach
+localhost, so use a tunnel (for example `ngrok http 3002`) during development.
 
 #### Privacy
 
