@@ -18,6 +18,8 @@ const initialized = ref(false);
 let initPromise: Promise<void> | null = null;
 
 const isAuthenticated = computed(() => user.value !== null);
+/** True when the server says this account may open the admin dashboard. */
+const isAdmin = computed(() => user.value?.isAdmin === true);
 
 /**
  * Resolves the current session once. Safe to call from multiple places; the
@@ -85,6 +87,7 @@ export function useAuth() {
     user: readonly(user),
     initialized: readonly(initialized),
     isAuthenticated,
+    isAdmin,
     initAuth,
     refreshUser,
     login,

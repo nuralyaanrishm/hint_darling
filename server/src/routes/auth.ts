@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { Router } from "express";
+import { isAdminEmail } from "../lib/admins.js";
 import { sendVerificationEmail } from "../lib/email.js";
 import {
   VERIFICATION_TTL_MINUTES,
@@ -63,6 +64,7 @@ interface PublicUser {
   email: string;
   plan: "FREE" | "PRO";
   proUnlockedAt: string | null;
+  isAdmin: boolean;
   createdAt: string;
 }
 
@@ -79,6 +81,8 @@ function toPublicUser(user: {
     email: user.email,
     plan: isProUser(user) ? "PRO" : "FREE",
     proUnlockedAt: user.proUnlockedAt?.toISOString() ?? null,
+    // Only ever describes the caller; the admin list itself is never exposed.
+    isAdmin: isAdminEmail(user.email),
     createdAt: user.createdAt.toISOString(),
   };
 }

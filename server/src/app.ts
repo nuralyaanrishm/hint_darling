@@ -14,7 +14,10 @@ import {
   attachSession,
   csrfProtection,
   issueCsrfToken,
+  requireAdmin,
+  requireAuth,
 } from "./middleware/auth.js";
+import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { billingRouter } from "./routes/billing.js";
 import { claimsRouter } from "./routes/claims.js";
@@ -59,6 +62,8 @@ export function createApp() {
   // All API routes live under /api (the Vite dev server proxies /api here).
   app.use("/api", healthRouter);
   app.use("/api/auth", authRouter);
+  // Read-only admin overview, gated by the ADMIN_EMAILS allowlist.
+  app.use("/api/admin", requireAuth, requireAdmin, adminRouter);
   app.use("/api/events", eventsRouter);
   app.use("/api/wishlists", wishlistsRouter);
   // One-time Pro unlock and billing status (signed-in only).

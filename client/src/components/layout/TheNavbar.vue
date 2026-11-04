@@ -7,7 +7,7 @@ import { useAuth } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
-const { isAuthenticated, user, logout } = useAuth();
+const { isAuthenticated, isAdmin, user, logout } = useAuth();
 
 const menuOpen = ref(false);
 const loggingOut = ref(false);
@@ -91,6 +91,13 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
           >
             Me
+          </RouterLink>
+          <RouterLink
+            v-if="isAdmin"
+            to="/admin"
+            class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+          >
+            Admin
           </RouterLink>
           <RouterLink
             v-if="isPro"
@@ -193,6 +200,13 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
           >
             Me
+          </RouterLink>
+          <RouterLink
+            v-if="isAdmin"
+            to="/admin"
+            class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
+          >
+            Admin
           </RouterLink>
           <RouterLink
             v-if="isPro"

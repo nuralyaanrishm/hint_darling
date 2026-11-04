@@ -9,6 +9,7 @@ import DashboardView from "@/views/DashboardView.vue";
 import EventFormView from "@/views/EventFormView.vue";
 import EventDetailView from "@/views/EventDetailView.vue";
 import BillingReturnView from "@/views/BillingReturnView.vue";
+import AdminView from "@/views/AdminView.vue";
 import PublicWishlistView from "@/views/PublicWishlistView.vue";
 import ClaimManageView from "@/views/ClaimManageView.vue";
 import MyClaimsView from "@/views/MyClaimsView.vue";
@@ -19,6 +20,8 @@ declare module "vue-router" {
     title?: string;
     description?: string;
     requiresAuth?: boolean;
+    /** Only for allowlisted admin accounts (server enforces it too). */
+    requiresAdmin?: boolean;
     guestOnly?: boolean;
   }
 }
@@ -137,6 +140,16 @@ const router = createRouter({
       },
     },
     {
+      path: "/admin",
+      name: "admin",
+      component: AdminView,
+      meta: {
+        title: "Admin",
+        requiresAuth: true,
+        requiresAdmin: true,
+      },
+    },
+    {
       path: "/about",
       name: "about",
       component: PlaceholderView,
@@ -192,13 +205,19 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
-  const { initAuth, isAuthenticated } = useAuth();
+  const { initAuth, isAuthenticated, isAdmin } = useAuth();
 
   // Resolve the session once before guarding so a refresh keeps the user in.
   await initAuth();
 
   if (to.meta.requiresAuth && !isAuthenticated.value) {
     return { name: "login", query: { redirect: to.fullPath } };
+  }
+
+  // Unknown to non-admins, even when they guess the URL. The API enforces the
+  // same rule, so this is only about not rendering a broken page.
+  if (to.meta.requiresAdmin && !isAdmin.value) {
+    return { name: "dashboard" };
   }
 
   if (to.meta.guestOnly && isAuthenticated.value) {

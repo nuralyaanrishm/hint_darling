@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isAdminEmail } from "../lib/admins.js";
 import { HttpError } from "../lib/errors.js";
 import {
   CSRF_COOKIE,
@@ -48,6 +49,29 @@ export function requireAuth(
 ): void {
   if (!req.auth) {
     next(new HttpError(401, "Authentication required"));
+    return;
+  }
+
+  next();
+}
+
+/**
+ * Rejects the request unless the signed-in user's email is on the
+ * `ADMIN_EMAILS` allowlist. Runs after `requireAuth`, so an anonymous caller
+ * gets `401` while a signed-in non-admin gets `403`.
+ */
+export function requireAdmin(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  if (!req.auth) {
+    next(new HttpError(401, "Authentication required"));
+    return;
+  }
+
+  if (!isAdminEmail(req.auth.user.email)) {
+    next(new HttpError(403, "Administrator access required"));
     return;
   }
 

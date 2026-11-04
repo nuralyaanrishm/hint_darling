@@ -18,6 +18,8 @@ export interface AuthUser {
   email: string;
   plan: "FREE" | "PRO";
   proUnlockedAt: string | null;
+  /** True when this account's email is on the server's ADMIN_EMAILS allowlist. */
+  isAdmin: boolean;
   createdAt: string;
 }
 
@@ -649,4 +651,46 @@ export async function cancelMyClaim(claimId: string): Promise<CancelResult> {
     { method: "POST" },
   );
   return data.claim;
+}
+
+/** Read-only admin dashboard payload. Claims are anonymised by the server. */
+export interface AdminOverview {
+  counts: {
+    users: number;
+    verifiedUsers: number;
+    proUsers: number;
+    events: number;
+    wishlists: number;
+    items: number;
+    activeClaims: number;
+  };
+  revenue: {
+    paidPurchases: number;
+    grossSen: number;
+    currency: string;
+  };
+  recentSignups: {
+    id: string;
+    name: string;
+    email: string;
+    plan: "FREE" | "PRO";
+    eventCount: number;
+    createdAt: string;
+  }[];
+  recentPurchases: {
+    email: string;
+    amountSen: number;
+    currency: string;
+    paidAt: string | null;
+  }[];
+  recentClaims: {
+    itemName: string;
+    wishlistTitle: string;
+    claimedAt: string;
+  }[];
+}
+
+/** Loads the admin overview. Requires an allowlisted (admin) session. */
+export async function getAdminOverview(): Promise<AdminOverview> {
+  return request<AdminOverview>("/admin/overview");
 }
