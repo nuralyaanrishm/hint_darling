@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   EmailDeliveryError,
   sendVerificationEmail,
+  setGmailTransportForTests,
+  type EmailTransport,
   type VerificationEmail,
 } from "../lib/email.js";
 
@@ -11,6 +13,11 @@ const ENV_KEYS = [
   "BREVO_FROM_EMAIL",
   "BREVO_FROM_NAME",
   "BREVO_BASE_URL",
+  "GMAIL_USER",
+  "GMAIL_APP_PASSWORD",
+  "GMAIL_FROM_EMAIL",
+  "GMAIL_FROM_NAME",
+  "GMAIL_SMTP_PORT",
 ] as const;
 
 const email: VerificationEmail = {
@@ -32,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setGmailTransportForTests(null);
   for (const key of ENV_KEYS) {
     const value = savedEnv[key];
     if (value === undefined) {
@@ -47,6 +55,12 @@ function configureBrevo(): void {
   process.env.BREVO_API_KEY = "xkeysib-test";
   process.env.BREVO_FROM_EMAIL = "sender@example.com";
   process.env.BREVO_FROM_NAME = "Hint, Darling";
+}
+
+function configureGmail(): void {
+  process.env.GMAIL_USER = "sender@gmail.com";
+  process.env.GMAIL_APP_PASSWORD = "app-password";
+  process.env.GMAIL_FROM_NAME = "Hint, Darling";
 }
 
 describe("Brevo email transport", () => {
@@ -112,6 +126,105 @@ describe("Brevo email transport", () => {
         error.message,
         /Brevo rejected the email \(401\): .*Key not found/,
       );
+      return true;
+    });
+  });
+});
+
+describe("Gmail SMTP transport", () => {
+  interface SentMessage {
+    from: { name: string; address: string };
+    to: { name: string; address: string };
+    subject: string;
+    text: string;
+    html: string;
+  }
+
+  let sent: SentMessage[];
+
+  beforeEach(() => {
+    sent = [];
+    const transport: EmailTransport = {
+      sendMail: async (message) => {
+        sent.push(message);
+        return { messageId: "test" };
+      },
+    };
+    setGmailTransportForTests(transport);
+  });
+
+  it("sends through Gmail when configured", async () => {
+    configureGmail();
+
+    await sendVerificationEmail(email);
+
+    assert.equal(sent.length, 1);
+    const message = sent[0];
+    assert.deepEqual(message.from, {
+      name: "Hint, Darling",
+      address: "sender@gmail.com",
+    });
+    assert.deepEqual(message.to, {
+      name: "Ada, Lovelace",
+      address: "gift@example.com",
+    });
+    assert.equal(message.subject, "Your Hint, Darling verification code");
+    assert.match(message.text, /123456/);
+    assert.match(message.html, /Ada, Lovelace/);
+  });
+
+  it("uses GMAIL_FROM_EMAIL when set", async () => {
+    configureGmail();
+    process.env.GMAIL_FROM_EMAIL = "no-reply@example.com";
+
+    await sendVerificationEmail(email);
+
+    assert.equal(sent[0].from.address, "no-reply@example.com");
+  });
+
+  it("prefers Gmail over Brevo when both are configured", async () => {
+    configureGmail();
+    configureBrevo();
+
+    let brevoCalled = false;
+    globalThis.fetch = (async () => {
+      brevoCalled = true;
+      return new Response("{}", { status: 201 });
+    }) as typeof fetch;
+
+    await sendVerificationEmail(email);
+
+    assert.equal(brevoCalled, false);
+    assert.equal(sent.length, 1);
+  });
+
+  it("rejects partial Gmail configuration instead of silently using Brevo", async () => {
+    configureBrevo();
+    process.env.GMAIL_USER = "sender@gmail.com";
+
+    await assert.rejects(sendVerificationEmail(email), (error: unknown) => {
+      assert.ok(error instanceof EmailDeliveryError);
+      assert.match(
+        error.message,
+        /requires both GMAIL_USER and GMAIL_APP_PASSWORD/,
+      );
+      return true;
+    });
+    assert.equal(sent.length, 0);
+  });
+
+  it("wraps SMTP failures in EmailDeliveryError", async () => {
+    configureGmail();
+    setGmailTransportForTests({
+      sendMail: async () => {
+        throw new Error("Invalid login: 535-5.7.8");
+      },
+    });
+
+    await assert.rejects(sendVerificationEmail(email), (error: unknown) => {
+      assert.ok(error instanceof EmailDeliveryError);
+      assert.match(error.message, /Gmail SMTP rejected the email/);
+      assert.ok(error.cause instanceof Error);
       return true;
     });
   });

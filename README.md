@@ -162,13 +162,13 @@ Client.
    - `hint_darling` is the database name.
    - `PORT` is the port the Express API listens on (default `3002`).
 
-3. Add a signup OTP secret and Brevo credentials:
+3. Add a signup OTP secret and Gmail SMTP credentials:
 
    ```
    OTP_SECRET="<random secret of at least 16 characters>"
-   BREVO_API_KEY="<your Brevo API key>"
-   BREVO_FROM_EMAIL="<the address you verified in Brevo>"
-   BREVO_FROM_NAME="Hint, Darling"
+   GMAIL_USER="<your Gmail address>"
+   GMAIL_APP_PASSWORD="<your 16-character Google App Password>"
+   GMAIL_FROM_NAME="Hint, Darling"
    ```
 
    Generate the secret with:
@@ -177,13 +177,15 @@ Client.
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 
-   In Brevo, create a v3 API key under **Settings → API Keys**. Then add the
-   From address under **Settings → Senders, Domains, IPs → Senders** and enter
-   the 6-digit code Brevo emails to it. A domain is not required to send, but
-   Gmail/Yahoo compliance may cause Brevo to rewrite free-email senders, so a
-   verified custom domain is recommended for production. These values are
-   required in every environment: registration cannot send a code without them,
-   and a rejected send returns `502`.
+   `GMAIL_APP_PASSWORD` is a Google **App Password**, not your normal Google
+   account password. Enable 2-Step Verification on the account, then create one
+   at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+   The app sends through `smtp.gmail.com` on port `465` (implicit TLS) by
+   default; set `GMAIL_SMTP_PORT=587` to use STARTTLS instead. `GMAIL_FROM_EMAIL`
+   is optional and defaults to `GMAIL_USER`; Gmail only lets you send from an
+   address it has authorised. When Gmail is not configured, the app falls back
+   to Brevo (`BREVO_API_KEY` and `BREVO_FROM_EMAIL`). A rejected send returns
+   `502`.
 
 4. (Optional) Enable **Continue with Google**:
 
@@ -404,8 +406,9 @@ Cookie-based sessions with no tokens in JavaScript.
   header (double-submit). For signed-in requests the token is also checked
   against the session's stored digest.
 - **Email verification**: registration creates an unverified account and emails
-  a 6-digit code through Brevo. No session is issued until the code is
-  confirmed, so unverified accounts cannot sign in. Codes expire after 10
+  a 6-digit code through Gmail SMTP (or Brevo when Gmail is not configured). No
+  session is issued until the code is confirmed, so unverified accounts cannot
+  sign in. Codes expire after 10
   minutes, allow 5 attempts, and can be resent after a 60-second cooldown. Only
   an HMAC-SHA256 digest (keyed by `OTP_SECRET`) is stored; the raw code exists
   only in the email. Existing accounts are backfilled as verified by the

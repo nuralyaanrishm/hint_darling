@@ -1,7 +1,12 @@
+import nodemailer from "nodemailer";
+
 const DEFAULT_BREVO_BASE_URL = "https://api.brevo.com";
+const GMAIL_SMTP_HOST = "smtp.gmail.com";
+const GMAIL_SMTP_PORT = 465;
+const CONNECTION_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
-/** Raised when Brevo is not configured or rejects a send. */
+/** Raised when the email provider is not configured or rejects a send. */
 export class EmailDeliveryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -17,6 +22,27 @@ export interface VerificationEmail {
 }
 
 type EmailSender = (email: VerificationEmail) => Promise<void>;
+
+interface GmailConfig {
+  user: string;
+  pass: string;
+  fromEmail: string;
+  fromName: string;
+  port: number;
+  secure: boolean;
+}
+
+interface OutgoingEmail {
+  from: { name: string; address: string };
+  to: { name: string; address: string };
+  subject: string;
+  text: string;
+  html: string;
+}
+
+export interface EmailTransport {
+  sendMail(message: OutgoingEmail): Promise<unknown>;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -35,6 +61,46 @@ function sanitizeHeaderValue(value: string): string {
 function brevoBaseUrl(): string {
   const configured = process.env.BREVO_BASE_URL?.trim();
   return (configured || DEFAULT_BREVO_BASE_URL).replace(/\/+$/, "");
+}
+
+/**
+ * Reads the Gmail SMTP settings. Returns `null` when Gmail is not configured at
+ * all, and throws when only part of the configuration is present so a typo is
+ * not silently ignored in favour of Brevo.
+ */
+function gmailConfig(): GmailConfig | null {
+  const user = process.env.GMAIL_USER?.trim();
+  // Google displays app passwords in four groups; spaces are ignored by Gmail.
+  const pass = process.env.GMAIL_APP_PASSWORD?.trim().replaceAll(/\s+/g, "");
+
+  if (!user && !pass) {
+    return null;
+  }
+
+  if (!user || !pass) {
+    throw new EmailDeliveryError(
+      "Gmail SMTP requires both GMAIL_USER and GMAIL_APP_PASSWORD",
+    );
+  }
+
+  const configuredPort = Number(process.env.GMAIL_SMTP_PORT ?? GMAIL_SMTP_PORT);
+  const port =
+    Number.isInteger(configuredPort) &&
+    configuredPort > 0 &&
+    configuredPort <= 65_535
+      ? configuredPort
+      : GMAIL_SMTP_PORT;
+
+  return {
+    user,
+    pass,
+    fromEmail: process.env.GMAIL_FROM_EMAIL?.trim() || user,
+    fromName: sanitizeHeaderValue(
+      process.env.GMAIL_FROM_NAME ?? "Hint, Darling",
+    ),
+    port,
+    secure: port === GMAIL_SMTP_PORT,
+  };
 }
 
 function verificationEmailContent(email: VerificationEmail): {
@@ -88,6 +154,64 @@ function verificationEmailContent(email: VerificationEmail): {
   };
 }
 
+let cachedGmailTransport: EmailTransport | null = null;
+let cachedGmailTransportKey = "";
+let gmailTransportOverride: EmailTransport | null = null;
+
+function getGmailTransport(config: GmailConfig): EmailTransport {
+  if (gmailTransportOverride) {
+    return gmailTransportOverride;
+  }
+
+  const key = [
+    config.user,
+    config.pass,
+    config.port,
+    config.secure ? "secure" : "starttls",
+  ].join("\u0000");
+
+  if (!cachedGmailTransport || cachedGmailTransportKey !== key) {
+    cachedGmailTransport = nodemailer.createTransport({
+      host: GMAIL_SMTP_HOST,
+      port: config.port,
+      secure: config.secure,
+      auth: { user: config.user, pass: config.pass },
+      connectionTimeout: CONNECTION_TIMEOUT_MS,
+      greetingTimeout: CONNECTION_TIMEOUT_MS,
+      socketTimeout: CONNECTION_TIMEOUT_MS * 2,
+    });
+    cachedGmailTransportKey = key;
+  }
+
+  return cachedGmailTransport;
+}
+
+/** Replaces the Gmail transport in tests; passing `null` restores the real one. */
+export function setGmailTransportForTests(next: EmailTransport | null): void {
+  gmailTransportOverride = next;
+}
+
+async function sendViaGmail(
+  email: VerificationEmail,
+  config: GmailConfig,
+): Promise<void> {
+  const content = verificationEmailContent(email);
+
+  try {
+    await getGmailTransport(config).sendMail({
+      from: { name: config.fromName, address: config.fromEmail },
+      to: { name: sanitizeHeaderValue(email.name), address: email.to },
+      subject: content.subject,
+      text: content.textContent,
+      html: content.htmlContent,
+    });
+  } catch (error) {
+    throw new EmailDeliveryError("Gmail SMTP rejected the email", {
+      cause: error,
+    });
+  }
+}
+
 async function sendViaBrevo(email: VerificationEmail): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY?.trim();
   const senderEmail = process.env.BREVO_FROM_EMAIL?.trim();
@@ -133,14 +257,26 @@ async function sendViaBrevo(email: VerificationEmail): Promise<void> {
   }
 }
 
-let sender: EmailSender = sendViaBrevo;
+/** Uses Gmail SMTP when configured, otherwise falls back to Brevo. */
+async function sendViaConfiguredProvider(email: VerificationEmail): Promise<void> {
+  const config = gmailConfig();
+
+  if (config) {
+    await sendViaGmail(email, config);
+    return;
+  }
+
+  await sendViaBrevo(email);
+}
+
+let sender: EmailSender = sendViaConfiguredProvider;
 
 /**
  * Replaces the email transport. Tests use this to capture the generated code
- * instead of contacting Brevo; passing `null` restores the real sender.
+ * instead of contacting a provider; passing `null` restores the real sender.
  */
 export function setEmailSenderForTests(next: EmailSender | null): void {
-  sender = next ?? sendViaBrevo;
+  sender = next ?? sendViaConfiguredProvider;
 }
 
 export async function sendVerificationEmail(email: VerificationEmail): Promise<void> {
