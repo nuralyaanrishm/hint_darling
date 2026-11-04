@@ -117,14 +117,14 @@ async function copyLink() {
         <BaseInput
           id="claimant-name"
           v-model="claimantName"
-          label="Your name (optional, kept private)"
+          label="Your name (optional)"
           autocomplete="name"
           placeholder="e.g. Auntie Rose"
           :disabled="submitting"
         />
         <p class="mt-2 text-xs leading-relaxed text-ink/50">
-          The hosts won’t see this — it’s just so we can show your claim back to
-          you on this device.
+          So the hosts know who’s giving this gift. Leave it blank to stay
+          anonymous.
         </p>
       </div>
 

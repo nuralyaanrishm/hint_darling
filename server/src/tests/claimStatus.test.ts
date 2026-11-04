@@ -133,7 +133,7 @@ async function claimAsGiver(
 async function makePro(ownerEmail: string): Promise<void> {
   await prisma.user.update({
     where: { email: ownerEmail.toLowerCase() },
-    data: { proUnlockedAt: new Date() },
+    data: { plan: "PRO", planUnlockedAt: new Date() },
   });
 }
 
@@ -185,12 +185,12 @@ describe("owner claim-status dashboard", () => {
       "free owners do not see claim status",
     );
     assert.equal(airFryer.claimedCount, 0);
+    assert.equal(airFryer.claimantName, null);
     assert.equal(airFryer.claimsLocked, true);
 
     const serialised = JSON.stringify(detail.body);
     assert.equal(serialised.includes("Auntie Rose"), false, "claimant name leaked");
     assert.equal(serialised.includes(giverName), false, "giver account name leaked");
-    assert.equal(serialised.includes("claimantName"), false);
     assert.equal(serialised.includes("claimantUserId"), false);
     assert.equal(serialised.includes("claimTokenHash"), false);
 
@@ -234,9 +234,11 @@ describe("owner claim-status dashboard", () => {
     assert.equal(event.body.event.wishlist.claimsLocked, false);
     assert.equal(airFryer.isClaimed, true);
     assert.equal(airFryer.claimedCount, 1);
+    assert.equal(airFryer.claimantName, "Auntie Rose");
     assert.equal(airFryer.claimsLocked, false);
     assert.equal(toaster.isClaimed, false);
     assert.equal(toaster.claimedCount, 0);
+    assert.equal(toaster.claimantName, null);
 
     const wishlist = await owner.request("GET", `/api/wishlists/${wishlistId}`);
     assert.equal(wishlist.status, 200);
@@ -246,6 +248,7 @@ describe("owner claim-status dashboard", () => {
     );
     assert.equal(wishlistItem.isClaimed, true);
     assert.equal(wishlistItem.claimedCount, 1);
+    assert.equal(wishlistItem.claimantName, "Auntie Rose");
 
     const events = await owner.request("GET", "/api/events");
     const summary = (events.body.events as any[]).find(
@@ -254,9 +257,35 @@ describe("owner claim-status dashboard", () => {
     assert.equal(summary.wishlist.claimedCount, 1);
     assert.equal(summary.wishlist.claimsLocked, false);
 
+    // Pro owners may see the display name, but never the account internals.
     const serialised = JSON.stringify({ event: event.body, events: events.body });
-    assert.equal(serialised.includes("Auntie Rose"), false, "claimant name leaked");
-    assert.equal(serialised.includes("claimantName"), false);
+    assert.equal(serialised.includes("Auntie Rose"), true);
+    assert.equal(serialised.includes("claimantUserId"), false);
+    assert.equal(serialised.includes("claimTokenHash"), false);
+  });
+
+  it("shows no name to a Pro owner when the claimant stayed anonymous", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const { owner, giver, eventId, shareToken, itemA, ownerEmail } =
+      await makeFixture("pro-anon-claim");
+
+    await giver.ensureCsrf();
+    const claimed = await giver.request(
+      "POST",
+      `/api/public/wishlists/${shareToken}/items/${itemA}/claims`,
+      { json: { idempotencyKey: `${runId}-anon-claim` } },
+    );
+    assert.equal(claimed.status, 201);
+    await makePro(ownerEmail);
+
+    const event = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(event.status, 200);
+    const airFryer = (event.body.event.wishlist.items as any[]).find(
+      (item: any) => item.id === itemA,
+    );
+    assert.equal(airFryer.isClaimed, true);
+    assert.equal(airFryer.claimantName, null);
   });
 
   it("marks a newly created item as available", async (t) => {

@@ -10,26 +10,44 @@ const itemOrder = [
   { createdAt: "asc" as const },
 ];
 
-// Owner views only ever need to know *that* a gift is claimed. We select claim
-// ids alone, never `claimantName`, `claimantUserId` or `claimTokenHash`, so the
-// private gift-giver identity is not even loaded from the database.
-const activeClaimSelect = {
-  where: { status: "CLAIMED" as const },
-  select: { id: true },
-};
+// Owner views need to know *that* a gift is claimed. The claimant's display
+// name is only loaded for Pro owners, who are allowed to see who reserved it.
+// `claimantUserId` and `claimTokenHash` are never selected, so the account
+// identity and management secret cannot leak.
+function activeClaimSelect(includeClaimantName: boolean) {
+  return {
+    where: { status: "CLAIMED" as const },
+    select: includeClaimantName
+      ? { id: true, claimantName: true }
+      : { id: true },
+  };
+}
 
-const ownedItemsInclude = {
-  orderBy: itemOrder,
-  include: { claims: activeClaimSelect },
-};
+function ownedItemsInclude(includeClaimantName: boolean) {
+  return {
+    orderBy: itemOrder,
+    include: { claims: activeClaimSelect(includeClaimantName) },
+  };
+}
+
+interface OwnerViewOptions {
+  /** True when the owner's Pro plan unlocks claim insights (including names). */
+  includeClaimantName?: boolean;
+}
 
 /** Loads an event plus its wishlist and items, scoped to the owner. */
-export async function getOwnedEvent(userId: string, eventId: string) {
+export async function getOwnedEvent(
+  userId: string,
+  eventId: string,
+  options: OwnerViewOptions = {},
+) {
   const event = await prisma.event.findFirst({
     where: { id: eventId, ownerId: userId },
     include: {
       wishlist: {
-        include: { items: ownedItemsInclude },
+        include: {
+          items: ownedItemsInclude(options.includeClaimantName ?? false),
+        },
       },
     },
   });
@@ -42,12 +60,16 @@ export async function getOwnedEvent(userId: string, eventId: string) {
 }
 
 /** Loads a wishlist plus its event, scoped to the event owner. */
-export async function getOwnedWishlist(userId: string, wishlistId: string) {
+export async function getOwnedWishlist(
+  userId: string,
+  wishlistId: string,
+  options: OwnerViewOptions = {},
+) {
   const wishlist = await prisma.wishlist.findFirst({
     where: { id: wishlistId, event: { ownerId: userId } },
     include: {
       event: { select: { id: true, name: true, ownerId: true } },
-      items: ownedItemsInclude,
+      items: ownedItemsInclude(options.includeClaimantName ?? false),
     },
   });
 

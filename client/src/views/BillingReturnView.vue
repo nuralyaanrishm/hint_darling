@@ -14,10 +14,11 @@ type State = "checking" | "success" | "pending" | "error";
 
 const state = ref<State>("checking");
 const message = ref<string | null>(null);
+const planLabel = ref("your plan");
 
 usePageMeta(() => ({
   title: "Payment · Hint, Darling",
-  description: "Confirming your one-time Pro unlock.",
+  description: "Confirming your one-time plan purchase.",
 }));
 
 async function check() {
@@ -27,7 +28,8 @@ async function check() {
   try {
     const result = await reconcilePurchase();
 
-    if (result.billing.plan === "PRO") {
+    if (result.billing.plan !== "FREE") {
+      planLabel.value = result.billing.planLabel;
       await refreshUser();
       state.value = "success";
       return;
@@ -76,9 +78,8 @@ onMounted(() => {
         </div>
         <h1 class="mt-5 font-display text-3xl text-ink">You're all unlocked!</h1>
         <p class="mt-3 text-sm leading-relaxed text-ink/70">
-          Your account now has unlimited gifts on every wishlist and claim
-          insights so you can see how many gifts have been reserved. Thank you
-          for supporting Hint, Darling.
+          {{ planLabel }} is now active on your account. Thank you for
+          supporting Hint, Darling.
         </p>
         <BaseButton to="/dashboard" class="mt-6">Back to my wishlists</BaseButton>
       </template>

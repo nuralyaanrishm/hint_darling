@@ -293,7 +293,7 @@ onMounted(load);
         </div>
 
         <p class="mt-8 text-center text-xs text-ink/45">
-          Manage your gift privately — nobody else can see who claimed it.
+          Manage your gift privately — this link is yours alone.
         </p>
       </template>
     </section>
@@ -301,7 +301,7 @@ onMounted(load);
     <ConfirmDialog
       v-model="cancelOpen"
       title="Release this gift?"
-      message="“{{ claim?.gift.name }}” will become available for another guest to claim. You can’t undo this on this page."
+      :message="`“${claim?.gift.name ?? 'This gift'}” will become available for another guest to claim. You can’t undo this on this page.`"
       confirm-label="Yes, release it"
       cancel-label="Keep it"
       :loading="cancelling"

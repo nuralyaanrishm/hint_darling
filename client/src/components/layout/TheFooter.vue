@@ -3,6 +3,7 @@ import { RouterLink } from "vue-router";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
 
 const footerLinks = [
+  { label: "Pricing", to: "/#pro" },
   { label: "About", to: "/about" },
   { label: "Contact", to: "/contact" },
 ];

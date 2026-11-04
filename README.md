@@ -8,10 +8,10 @@ thing twice.
 > This repository contains the **project foundation**, **secure cookie-based
 > authentication**, **event and wishlist management**, **public wishlist
 > viewing and sharing**, **guest gift-claiming**, and the **owner-facing claim
-> status dashboard (Pro) + gift-giver view**. Registration, login, logout, session
-> handling, events, wishlists, public guest viewing and claiming (with
+> status dashboard (Plus/Pro) + gift-giver view**. Registration, login, logout,
+> session handling, events, wishlists, public guest viewing and claiming (with
 > cancellation and concurrency-safe reservations), privacy modes, the owner's
-> private claim dashboard (unlocked with the one-time RM1 Pro purchase) and a
+> private claim dashboard (unlocked with a one-time plan purchase) and a
 > gift-giver's own-reservations page are all implemented.
 
 ## Tech stack
@@ -104,12 +104,12 @@ The client ships a small coquette-inspired design system and a landing page.
     gift-giver's **own reservations** page — a list of the gifts they've
     promised to give, with a release action. It only ever shows the caller's
     claims.
-  - The event page doubles as the **owner's claim-status dashboard**, a **Pro**
-    feature: Pro owners see each gift as *claimed* or *available*, a friendly
-    summary such as "Someone's getting you 3 of 5! 🎁", and a claimed-count per
-    event on the main dashboard. Free owners instead see an "unlock Pro to view
-    claimed gifts" prompt until they make the one-time RM1 purchase. The owner
-    can never see who claimed a gift.
+  - The event page doubles as the **owner's claim-status dashboard**, a
+    **Plus/Pro** feature: paid owners see each gift as *claimed* or
+    *available*, a friendly summary such as "Someone's getting you 3 of 5! 🎁",
+    and a claimed-count per event on the main dashboard. Paid owners also see
+    the optional gift-giver name on each claimed gift. Free owners instead see
+    an "unlock Plus to view claimed gifts" prompt until they buy a plan.
   - The remaining routes show an honest "coming soon" placeholder.
 - **Sharing**: owners get a share panel on the event page (copy link, native
   share, WhatsApp, QR code). The same panel appears for guests on the public
@@ -298,7 +298,7 @@ claim gifts on the public page.
 ## Gift claiming
 
 A guest opens a shared link, taps **“I’ll get this!”** on a gift, optionally
-adds their name (kept private), and confirms. The backend reserves the item in
+adds their name (shown only to Plus/Pro owners), and confirms. The backend reserves the item in
 a single atomic transaction, other guests immediately see the gift as claimed,
 and a successful claim returns a private **management link** the gift-giver can
 use to view or release their claim later. If someone else claims first, a
@@ -339,38 +339,43 @@ reserve the same gift twice — and never loses their management link.
   claim. Other guests' attempts return `404`. Owners cannot cancel claims on
   behalf of guests in this version.
 
-### Owner privacy
+### Claim privacy
 
 The public wishlist projection exposes **no gift-giver information** — not even
-the optional display name — only whether a gift is claimed. The claimant's
-identity stays private for signed-in gift-givers too: their user is recorded
-server-side (`claimantUserId`) so the account can be traced if needed, but it is
-never serialised into any response the owner or other guests can read.
+the optional display name — only whether a gift is claimed. Guests therefore
+still see availability without learning who reserved what.
+
+Plus/Pro owners may see the optional display name the gift-giver typed when
+claiming (`claimantName`). This is the only owner-facing identity field: the
+account behind the claim (`claimantUserId`) and the management secret
+(`claimTokenHash`) are never serialised. Free owners continue to see no claim
+details at all.
 
 This is enforced in the **database query itself**, not hidden with Vue. Owner
-views (`GET /api/events`, `GET /api/events/:id`, `GET /api/wishlists/:id`) and
-the public projection only ever `select` active claim **ids** (plus a count), so
-`claimantName`, `claimantUserId` and `claimTokenHash` are never even loaded for
-them. The response schemas then surface a simple `isClaimed` / `claimedCount`
-(plus `claimsLocked`) and nothing more. For a Free owner, claim insights are
-withheld entirely: `claimsLocked` is `true` and the counts/statuses are zeroed
-until the account is upgraded to Pro. The only response that can contain a name
-is a claimant's own (`GET /api/claims` and `GET /api/public/claims/:token`), and
-those are scoped to that single gift-giver.
+queries only `select` the display name when the owner is Pro; otherwise they
+select active claim **ids** (plus a count) only, so `claimantName` is never
+loaded for Free owners, and `claimantUserId` / `claimTokenHash` are never loaded
+for anyone. The response schemas surface `isClaimed` / `claimedCount` (plus
+`claimantName` and `claimsLocked`). For a Free owner, claim insights are
+withheld entirely: `claimsLocked` is `true` and the counts/statuses/name are
+nulled until the account is upgraded to Plus or Pro. A claimant's own responses
+(`GET /api/claims` and `GET /api/public/claims/:token`) are scoped to that
+single gift-giver.
 
-### Owner claim-status dashboard (Pro)
+### Owner claim-status dashboard (Plus/Pro)
 
-The owner's event page and dashboard summarise reservations without ever
-revealing who is behind them. Claim insights are part of the one-time Pro
-unlock; free owners are shown an "unlock Pro to see how many gifts are claimed"
-prompt, and the API withholds claim status from their responses.
+The owner's event page and dashboard summarise reservations and, for paid
+owners, name the optional gift-giver on each claimed gift. Claim insights are
+part of the one-time Plus/Pro plans; free owners are shown an "unlock Plus to
+see how many gifts are claimed" prompt, and the API withholds claim status from
+their responses.
 
 - each gift card shows a warm **Claimed — someone's getting you this gift! 🎁**
-  or **Available** state with a subtle gift icon (Pro owners only);
+  or **Available** state with a subtle gift icon (Plus/Pro owners only);
 - the event page shows a progress summary ("Someone's getting you 3 of 5! 🎁")
-  and a claimed-count meter (Pro owners only);
-- the events list shows a private "2 of 5 gifts claimed" line per event (Pro
-  owners only).
+  and a claimed-count meter (Plus/Pro owners only);
+- the events list shows a private "2 of 5 gifts claimed" line per event
+  (Plus/Pro owners only).
 
 ### Gift-giver view
 
@@ -497,19 +502,34 @@ These require a session and are always scoped to the caller's own claims:
 | `GET`  | `/api/claims`                 | List the caller's own claims (never anyone else's). |
 | `POST` | `/api/claims/:claimId/cancel` | Release one of the caller's own claims.             |
 
-### One-time Pro unlock
+### Plans & pricing
 
-Free accounts can add **5 gifts per wishlist**. A one-time **RM1** ToyyibPay
-purchase unlocks unlimited gifts for the account forever (no subscription or
-renewal). The price, free limit and plan rules live in
-`server/src/lib/plans.ts`.
+Plans are **one-time purchases** (no subscription or renewal). Each paid tier
+can be bought with ToyyibPay, and upgrading from Plus to Pro pays the full Pro
+price. Plans never downgrade.
+
+| Feature | Darling Free | Darling Plus (RM9.90) | Darling Pro (RM19.90) |
+| --- | --- | --- | --- |
+| Active wishlists | 1 | 3 | Unlimited |
+| Gift items per wishlist | 5 | Unlimited | Unlimited |
+| Shareable link | ✓ | ✓ | ✓ |
+| Event details | ✓ | ✓ | ✓ |
+| Gift reservation tracking | ✗ | ✓ | ✓ |
+| Priority support | ✗ | ✓ | ✓ |
+| Guest video/image notes | ✗ | ✗ | ✓ |
+| Event analytics | ✗ | ✗ | ✓ |
+
+Priority support, guest media notes, and event analytics are gated behind plan
+flags and marked "Soon" in the UI until their flows ship. Prices, limits and
+feature flags live in `server/src/lib/plans.ts`.
 
 | Method | Path                                   | Description                                            |
 | ------ | -------------------------------------- | ------------------------------------------------------ |
-| `GET`  | `/api/billing`                         | Current plan, free limit and unlock price.             |
-| `POST` | `/api/billing/unlock`                  | Create a fixed RM1 ToyyibPay bill and return its URL.  |
-| `POST` | `/api/billing/reconcile`               | Re-check a pending bill when a callback was missed.    |
-| `POST` | `/api/public/toyyibpay/callback`       | ToyyibPay server callback (MD5 checksum, no CSRF).     |
+| `GET`  | `/api/billing`                         | Current plan, limits, features and price catalog.       |
+| `POST` | `/api/billing/checkout`                | Start a one-time Plus or Pro ToyyibPay checkout.        |
+| `POST` | `/api/billing/unlock`                  | Deprecated alias that starts a Pro checkout.            |
+| `POST` | `/api/billing/reconcile`               | Re-check a pending bill when a callback was missed.     |
+| `POST` | `/api/public/toyyibpay/callback`       | ToyyibPay server callback (MD5 checksum, no CSRF).      |
 
 ToyyibPay credentials and public callback/return URLs are configured with the
 `TOYYIBPAY_*` variables in `server/.env.example`. Callbacks cannot reach
@@ -521,9 +541,10 @@ localhost, so use a tunnel (for example `ngrok http 3002`) during development.
   bytes, base64url). Tokens are validated on the server before any lookup and are
   rate-limited to blunt scraping.
 - The public projection deliberately **never exposes** the owner or their email,
-  internal wishlist/event ids, the share token, private item `notes`, or **any
-  gift-giver information** (only a count of claims, so guests can see
-  availability without seeing who claimed what).
+  internal wishlist/event ids, the share token, or **any gift-giver
+  information** (only a count of claims, so guests can see availability without
+  seeing who claimed what). Item `notes` are public so owners can add gift
+  hints or wrapping instructions for guests.
 - Inactive (`isActive = false`), private (`privacyMode = PRIVATE`), deleted and
   unknown wishlists are indistinguishable: they all return `404`, and the
   response is sent with `Cache-Control: no-store` so a disabled list stops being
@@ -554,8 +575,8 @@ items, reordering, rejecting unsafe URLs, and confirming that **another user
 cannot view, change or delete events, wishlists or items they don't own**.
 
 Public viewing has its own suite: a guest can read a shared list without signing
-in; the response leaks no account data, internal ids, private notes or
-gift-giver details and reports availability correctly; unknown, malformed,
+in; the response leaks no account data, internal ids or gift-giver details,
+exposes item notes, and reports availability correctly; unknown, malformed,
 inactive and deleted tokens all return `404`; tokens are distinct and long; and
 guest writes are rejected across the public and owner routes. Claiming is also
 integration-tested: happy-path claiming, idempotent double-submits, the friendly

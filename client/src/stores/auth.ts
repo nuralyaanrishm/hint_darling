@@ -1,4 +1,5 @@
 import { computed, readonly, ref } from "vue";
+import type { PlanTier } from "@/lib/plans";
 import {
   getCurrentUser,
   login as apiLogin,
@@ -20,6 +21,10 @@ let initPromise: Promise<void> | null = null;
 const isAuthenticated = computed(() => user.value !== null);
 /** True when the server says this account may open the admin dashboard. */
 const isAdmin = computed(() => user.value?.isAdmin === true);
+/** The current one-time plan; signed-out visitors are treated as Free. */
+const currentPlan = computed<PlanTier>(() => user.value?.plan ?? "FREE");
+/** Gift reservation tracking is included on Plus and Pro. */
+const canViewClaims = computed(() => currentPlan.value !== "FREE");
 
 /**
  * Resolves the current session once. Safe to call from multiple places; the
@@ -43,7 +48,7 @@ function initAuth(): Promise<void> {
   return initPromise;
 }
 
-/** Re-reads the signed-in user, e.g. after a successful Pro purchase. */
+/** Re-reads the signed-in user, e.g. after a successful plan purchase. */
 async function refreshUser(): Promise<AuthUser | null> {
   try {
     user.value = await getCurrentUser();
@@ -88,6 +93,8 @@ export function useAuth() {
     initialized: readonly(initialized),
     isAuthenticated,
     isAdmin,
+    currentPlan,
+    canViewClaims,
     initAuth,
     refreshUser,
     login,

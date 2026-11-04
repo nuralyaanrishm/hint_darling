@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
-import UnlockDialog from "@/components/billing/UnlockDialog.vue";
+import PlanCheckoutDialog from "@/components/billing/PlanCheckoutDialog.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
 import GiftIcon from "@/components/decor/GiftIcon.vue";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
@@ -14,6 +14,11 @@ import WishlistItemCard from "@/components/wishlist/WishlistItemCard.vue";
 import WishlistItemForm from "@/components/wishlist/WishlistItemForm.vue";
 import WishlistSharePanel from "@/components/wishlist/WishlistSharePanel.vue";
 import { eventTypeLabel } from "@/lib/eventOptions";
+import {
+  PLAN_CATALOG,
+  formatPlanPrice,
+  type PlanTier,
+} from "@/lib/plans";
 import {
   addWishlistItem,
   createWishlist,
@@ -36,7 +41,7 @@ import { useAuth } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
-const { user } = useAuth();
+const { currentPlan } = useAuth();
 
 const eventId = computed(() =>
   typeof route.params.id === "string" ? route.params.id : "",
@@ -50,10 +55,21 @@ const pageError = ref<string | null>(null);
 const wishlist = computed(() => event.value?.wishlist ?? null);
 
 const billing = ref<BillingSummary | null>(null);
-const isPro = computed(() => user.value?.plan === "PRO");
-const freeItemLimit = computed(() => billing.value?.freeItemLimit ?? 5);
+const plan = computed<PlanTier>(() => billing.value?.plan ?? currentPlan.value);
+const planLabel = computed(() => PLAN_CATALOG[plan.value].label);
+const itemLimit = computed<number | null>(
+  () => billing.value?.itemLimit ?? PLAN_CATALOG[plan.value].itemLimit,
+);
 const atFreeLimit = computed(
-  () => !isPro.value && (wishlist.value?.items.length ?? 0) >= freeItemLimit.value,
+  () =>
+    itemLimit.value !== null &&
+    (wishlist.value?.items.length ?? 0) >= itemLimit.value,
+);
+const upgradePlan = computed<Exclude<PlanTier, "FREE">>(() =>
+  plan.value === "FREE" ? "PLUS" : "PRO",
+);
+const upgradePrice = computed(() =>
+  formatPlanPrice(PLAN_CATALOG[upgradePlan.value].priceSen),
 );
 
 const unlockOpen = ref(false);
@@ -209,6 +225,11 @@ async function onSaveWishlist(payload: WishlistInput) {
     if (isApiError(error)) {
       if (error.status === 401) {
         redirectToLogin();
+        return;
+      }
+      if (error.code === "WISHLIST_LIMIT_REACHED") {
+        wishlistModalOpen.value = false;
+        unlockOpen.value = true;
         return;
       }
       wishlistFormError.value = error.message;
@@ -485,10 +506,12 @@ watch(
               <p class="mt-3 text-sm text-ink/60">
                 {{ wishlist.items.length }}
                 {{ wishlist.items.length === 1 ? "gift" : "gifts" }}
-                <span v-if="isPro" class="text-ink/45"> · Pro, unlimited</span>
+                <span v-if="itemLimit === null" class="text-ink/45">
+                  · {{ planLabel }}, unlimited
+                </span>
                 <span v-else class="text-ink/45">
-                  · {{ wishlist.items.length }} / {{ freeItemLimit }} on Free
-                  plan
+                  · {{ wishlist.items.length }} / {{ itemLimit }} on
+                  {{ planLabel }} plan
                 </span>
               </p>
             </div>
@@ -502,7 +525,7 @@ watch(
                 Edit wishlist
               </BaseButton>
               <BaseButton size="sm" @click="openAddItemOrUnlock">
-                {{ atFreeLimit ? "Unlock Pro" : "Add gift" }}
+                {{ atFreeLimit ? "Upgrade plan" : "Add gift" }}
               </BaseButton>
             </div>
           </div>
@@ -514,15 +537,15 @@ watch(
         >
           <div>
             <p class="text-sm font-medium text-ink">
-              You've used all {{ freeItemLimit }} free gifts on this wishlist.
+              You've used all {{ itemLimit }} gifts on this wishlist.
             </p>
             <p class="mt-1 text-sm text-ink/65">
-              Unlock unlimited gifts for this wishlist and every future one —
-              one payment, yours forever.
+              Upgrade to Darling Plus for unlimited gifts on this wishlist and
+              every future one — one payment, yours forever.
             </p>
           </div>
           <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
-            Unlock Pro for RM1
+            Upgrade for {{ upgradePrice }}
           </BaseButton>
         </div>
 
@@ -578,7 +601,7 @@ watch(
                   {{
                     claimSummary.claimed === 0
                       ? "Your gifts are all still available — share your list to get them noticed."
-                      : `You can see which gifts are reserved, but never who's getting them.`
+                      : `You can see which gifts are reserved and who's giving them.`
                   }}
                 </p>
               </div>
@@ -634,17 +657,17 @@ watch(
                 Gift status
               </p>
               <p class="mt-1 font-display text-2xl text-ink">
-                Unlock Pro to see how many gifts are claimed
+                Unlock Plus to see how many gifts are claimed
               </p>
               <p class="mt-1 text-sm text-ink/65">
-                Claim tracking is part of Pro. Unlock once for RM1 to see
-                which of your gifts have been reserved — you'll never see who
-                claimed them.
+                Claim tracking is part of Plus and Pro. One payment from
+                RM 9.90 lets you see which gifts have been reserved and who's
+                giving them.
               </p>
             </div>
           </div>
           <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
-            Unlock Pro for RM1
+            View upgrade options
           </BaseButton>
         </div>
 
@@ -681,10 +704,7 @@ watch(
       </template>
     </template>
 
-    <UnlockDialog
-      v-model="unlockOpen"
-      :price-sen="billing?.priceSen ?? 100"
-    />
+    <PlanCheckoutDialog v-model="unlockOpen" :plan="upgradePlan" />
 
     <WishlistForm
       v-model="wishlistModalOpen"

@@ -102,7 +102,7 @@ async function makeFixture(label: string): Promise<Fixture> {
         preferredColour: "Sage green",
         preferredSize: "5.5L",
         quantity: 1,
-        notes: "Private owner note that must never be public",
+        notes: "Gift wrap in the sage paper please",
       },
     },
   );
@@ -170,12 +170,13 @@ describe("public wishlist viewing", () => {
     assert.equal(gift.imageUrl, "https://example.com/air-fryer.jpg");
     assert.equal(gift.productUrl, "https://example.com/ninja-air-fryer");
     assert.equal(gift.preferredColour, "Sage green");
+    assert.equal(gift.notes, "Gift wrap in the sage paper please");
     assert.equal(gift.remaining, 1);
     assert.equal(gift.claimedCount, 0);
     assert.equal(gift.isFullyClaimed, false);
   });
 
-  it("never exposes account data, internal ids, notes or gift-givers", async (t) => {
+  it("never exposes account data, internal ids or gift-givers", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const { guest, shareToken, ownerEmail } = await makeFixture("privacy");
@@ -189,7 +190,6 @@ describe("public wishlist viewing", () => {
     assert.equal(serialised.includes(ownerEmail), false, "owner email leaked");
     assert.equal(serialised.includes("passwordHash"), false);
     assert.equal(serialised.includes("shareToken"), false);
-    assert.equal(serialised.includes("Private owner note"), false);
 
     const { wishlist } = response.body;
     assert.equal(wishlist.id, undefined);
@@ -197,7 +197,7 @@ describe("public wishlist viewing", () => {
     assert.equal(wishlist.isActive, undefined);
     assert.equal(wishlist.event.id, undefined);
     assert.equal(wishlist.event.ownerId, undefined);
-    assert.equal(wishlist.items[0].notes, undefined);
+    assert.equal(wishlist.items[0].notes, "Gift wrap in the sage paper please");
     assert.equal(wishlist.items[0].wishlistId, undefined);
   });
 

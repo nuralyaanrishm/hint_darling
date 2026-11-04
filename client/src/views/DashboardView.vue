@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
-import UnlockDialog from "@/components/billing/UnlockDialog.vue";
+import PlanCheckoutDialog from "@/components/billing/PlanCheckoutDialog.vue";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import EmptyState from "@/components/ui/EmptyState.vue";
 import LoadingState from "@/components/ui/LoadingState.vue";
@@ -18,10 +18,19 @@ import {
   type EventSummary,
 } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
+import {
+  PLAN_CATALOG,
+  PLAN_FEATURE_LABELS,
+  PLAN_FEATURE_ORDER,
+  formatPlanPrice,
+  planRank,
+  type PlanFeatureKey,
+  type PlanTier,
+} from "@/lib/plans";
 
 const route = useRoute();
 const router = useRouter();
-const { user, logout } = useAuth();
+const { user, logout, currentPlan } = useAuth();
 
 const events = ref<EventSummary[]>([]);
 const loading = ref(true);
@@ -30,12 +39,14 @@ const loggingOut = ref(false);
 
 const billing = ref<BillingSummary | null>(null);
 const unlockOpen = ref(false);
-const isPro = computed(() => user.value?.plan === "PRO");
-const freeItemLimit = computed(() => billing.value?.freeItemLimit ?? 5);
-const unlockPriceSen = computed(() => billing.value?.priceSen ?? 100);
+const selectedUpgrade = ref<Exclude<PlanTier, "FREE">>("PLUS");
 
-const proUnlockedLabel = computed(() => {
-  const value = billing.value?.proUnlockedAt ?? user.value?.proUnlockedAt ?? null;
+const plan = computed<PlanTier>(() => billing.value?.plan ?? currentPlan.value);
+const planDefinition = computed(() => PLAN_CATALOG[plan.value]);
+
+const planUnlockedLabel = computed(() => {
+  const value =
+    billing.value?.planUnlockedAt ?? user.value?.planUnlockedAt ?? null;
   if (!value) return null;
   return new Date(value).toLocaleDateString(undefined, {
     day: "numeric",
@@ -44,9 +55,36 @@ const proUnlockedLabel = computed(() => {
   });
 });
 
-function formatPrice(sen: number) {
-  const amount = sen / 100;
-  return `RM${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
+const benefitRows = computed(() =>
+  PLAN_FEATURE_ORDER.map((key) => ({
+    key,
+    label: PLAN_FEATURE_LABELS[key],
+    included: planDefinition.value.features[key],
+    comingSoon: planDefinition.value.comingSoon.includes(key as PlanFeatureKey),
+  })),
+);
+
+const upgrades = computed(() =>
+  (["PLUS", "PRO"] as const)
+    .filter((tier) => planRank(tier) > planRank(plan.value))
+    .map((tier) => ({ ...PLAN_CATALOG[tier], tier })),
+);
+
+const planDescription = computed(() => {
+  if (plan.value === "FREE") {
+    return `Your Free plan includes ${planDefinition.value.activeWishlistLimit} active wishlist and ${planDefinition.value.itemLimit} gifts per wishlist. Claim tracking is locked.`;
+  }
+
+  if (plan.value === "PLUS") {
+    return "Up to 3 active wishlists and unlimited gifts on every wishlist, with gift reservation tracking and priority support.";
+  }
+
+  return "Unlimited active wishlists and gifts on every wishlist, with gift reservation tracking and priority support, plus guest media notes on the way.";
+});
+
+function openUpgrade(plan: Exclude<PlanTier, "FREE">) {
+  selectedUpgrade.value = plan;
+  unlockOpen.value = true;
 }
 
 async function loadBilling() {
@@ -146,10 +184,10 @@ onMounted(() => {
             Hello, {{ user?.name }}
           </h1>
           <span
-            v-if="isPro"
+            v-if="plan !== 'FREE'"
             class="rounded-full bg-rose px-2.5 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white"
           >
-            Pro
+            {{ planDefinition.shortLabel }}
           </span>
         </div>
         <p class="mt-2 text-sm text-ink/70">Signed in as {{ user?.email }}</p>
@@ -169,81 +207,69 @@ onMounted(() => {
             <span
               class="rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.18em]"
               :class="
-                isPro
+                plan !== 'FREE'
                   ? 'bg-rose/10 text-rose-deep'
                   : 'bg-blush/70 text-ink/70'
               "
             >
-              {{ isPro ? "Pro" : "Free" }}
+              {{ planDefinition.shortLabel }}
             </span>
             <h2 class="font-display text-2xl text-ink">
-              {{ isPro ? "Pro membership" : "Free plan" }}
+              {{ planDefinition.label }}
             </h2>
           </div>
 
-          <p v-if="isPro" class="mt-2 text-sm leading-relaxed text-ink/70">
-            Unlimited gifts on every wishlist, with claim insights.
-            <template v-if="proUnlockedLabel">
-              Unlocked {{ proUnlockedLabel }}.
+          <p class="mt-2 text-sm leading-relaxed text-ink/70">
+            {{ planDescription }}
+            <template v-if="planUnlockedLabel">
+              Unlocked {{ planUnlockedLabel }}.
             </template>
-            Thank you for supporting Hint, Darling.
-          </p>
-          <p v-else class="mt-2 text-sm leading-relaxed text-ink/70">
-            Your wishlists hold up to {{ freeItemLimit }} gifts and claim
-            insights are locked. Unlock Pro once to add unlimited gifts and see
-            how many have been claimed.
           </p>
         </div>
 
-        <BaseButton
-          v-if="!isPro"
-          size="sm"
-          class="shrink-0"
-          @click="unlockOpen = true"
-        >
-          Unlock Pro for {{ formatPrice(unlockPriceSen) }}
-        </BaseButton>
+        <div v-if="upgrades.length" class="flex shrink-0 flex-wrap gap-2">
+          <BaseButton
+            v-for="upgrade in upgrades"
+            :key="upgrade.tier"
+            size="sm"
+            :variant="upgrade.tier === 'PRO' ? 'primary' : 'secondary'"
+            @click="openUpgrade(upgrade.tier)"
+          >
+            {{ upgrade.shortLabel }} · {{ formatPlanPrice(upgrade.priceSen) }}
+          </BaseButton>
+        </div>
       </div>
 
       <p class="mt-5 text-xs uppercase tracking-[0.2em] text-ink/45">
-        {{ isPro ? "Your Pro benefits" : "What you'll unlock" }}
+        {{ plan === "FREE" ? "What's included" : "Your plan benefits" }}
       </p>
       <ul class="mt-3 grid gap-2 text-sm text-ink/75 sm:grid-cols-2">
-        <li class="flex items-start gap-2">
+        <li
+          v-for="benefit in benefitRows"
+          :key="benefit.key"
+          class="flex items-start gap-2"
+        >
           <span
-            class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
+            v-if="!benefit.comingSoon"
+            class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+            :class="
+              benefit.included
+                ? 'bg-sage text-sage-deep'
+                : 'bg-blush/70 text-rose'
+            "
             aria-hidden="true"
           >
-            ✓
+            {{ benefit.included ? "✓" : "×" }}
           </span>
-          Unlimited gifts on every wishlist
-        </li>
-        <li class="flex items-start gap-2">
-          <span
-            class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-            aria-hidden="true"
-          >
-            ✓
+          <span>
+            {{ benefit.label }}
+            <span
+              v-if="benefit.comingSoon"
+              class="ml-1 rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/55"
+            >
+              Soon
+            </span>
           </span>
-          See how many gifts have been claimed
-        </li>
-        <li class="flex items-start gap-2">
-          <span
-            class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-            aria-hidden="true"
-          >
-            ✓
-          </span>
-          One payment, yours forever
-        </li>
-        <li class="flex items-start gap-2">
-          <span
-            class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-            aria-hidden="true"
-          >
-            ✓
-          </span>
-          Secure FPX or card payment
         </li>
       </ul>
     </BaseCard>
@@ -300,6 +326,6 @@ onMounted(() => {
       @confirm="confirmDelete"
     />
 
-    <UnlockDialog v-model="unlockOpen" :price-sen="unlockPriceSen" />
+    <PlanCheckoutDialog v-model="unlockOpen" :plan="selectedUpgrade" />
   </section>
 </template>

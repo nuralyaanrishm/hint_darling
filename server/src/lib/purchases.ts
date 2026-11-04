@@ -2,10 +2,15 @@ import { Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { HttpError } from "./errors.js";
 import {
-  FREE_ITEM_LIMIT,
+  PLAN_CONFIG,
+  PLAN_ORDER,
   UNLOCK_CURRENCY,
-  UNLOCK_PRICE_SEN,
-  isProUser,
+  isPlanTier,
+  planRank,
+  type PlanDefinition,
+  type PlanFeatureKey,
+  type PlanFeatures,
+  type PlanTierName,
 } from "./plans.js";
 import { prisma } from "./prisma.js";
 import {
@@ -17,29 +22,49 @@ import {
   verifyCallbackHash,
 } from "./toyyibpay.js";
 
-// One-time Pro unlock purchases.
+// One-time plan purchases.
 //
 // A purchase row is the audit trail and the idempotency key for ToyyibPay.
 // `externalReference` is our opaque order id; ToyyibPay echoes it back as
 // `order_id` in the callback, which is how we match the payment to the account.
-// Once a purchase is PAID we set User.proUnlockedAt and never charge again.
+// Once a purchase is PAID we raise User.plan to the purchased tier. Plans never
+// downgrade, and each tier is a single lifetime payment.
 
 export interface BillingSummary {
-  plan: "FREE" | "PRO";
-  proUnlockedAt: string | null;
-  freeItemLimit: number;
-  priceSen: number;
+  plan: PlanTierName;
+  planLabel: string;
+  planUnlockedAt: string | null;
+  activeWishlistLimit: number | null;
+  itemLimit: number | null;
+  features: PlanFeatures;
+  comingSoon: PlanFeatureKey[];
+  isPaid: boolean;
+  prices: Record<PlanTierName, number>;
+  plans: PlanDefinition[];
   currency: string;
 }
 
 export function toBillingSummary(user: {
-  proUnlockedAt: Date | null;
+  plan: PlanTierName;
+  planUnlockedAt: Date | null;
 }): BillingSummary {
+  const current = PLAN_CONFIG[user.plan];
+
   return {
-    plan: isProUser(user) ? "PRO" : "FREE",
-    proUnlockedAt: user.proUnlockedAt?.toISOString() ?? null,
-    freeItemLimit: FREE_ITEM_LIMIT,
-    priceSen: UNLOCK_PRICE_SEN,
+    plan: user.plan,
+    planLabel: current.label,
+    planUnlockedAt: user.planUnlockedAt?.toISOString() ?? null,
+    activeWishlistLimit: current.activeWishlistLimit,
+    itemLimit: current.itemLimit,
+    features: current.features,
+    comingSoon: current.comingSoon,
+    isPaid: user.plan !== "FREE",
+    prices: {
+      FREE: PLAN_CONFIG.FREE.priceSen,
+      PLUS: PLAN_CONFIG.PLUS.priceSen,
+      PRO: PLAN_CONFIG.PRO.priceSen,
+    },
+    plans: PLAN_ORDER.map((tier) => PLAN_CONFIG[tier]),
     currency: UNLOCK_CURRENCY,
   };
 }
@@ -49,7 +74,7 @@ export async function getBillingSummary(
 ): Promise<BillingSummary> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { proUnlockedAt: true },
+    select: { plan: true, planUnlockedAt: true },
   });
 
   if (!user) {
@@ -63,18 +88,24 @@ interface PendingCheckout {
   existingBillCode: string | null;
   purchase: { id: string; externalReference: string } | null;
   user: { name: string; email: string };
+  plan: PlanTierName;
 }
 
 /**
- * Starts a one-time unlock checkout.
+ * Starts a one-time checkout for a paid tier.
  *
  * The user row is locked while we look for a recent pending bill, so a
  * double-click cannot create two payable bills. The actual ToyyibPay call runs
  * outside the transaction (network calls must not hold database locks).
  */
-export async function createUnlockCheckout(
+export async function createPlanCheckout(
   userId: string,
+  targetPlan: PlanTierName,
 ): Promise<{ paymentUrl: string }> {
+  if (!isPlanTier(targetPlan) || targetPlan === "FREE") {
+    throw new HttpError(400, "Choose Plus or Pro to continue.");
+  }
+
   // If a previous bill was paid but its callback never arrived, settle it now
   // so the user is never asked to pay twice.
   await reconcilePendingPurchases(userId);
@@ -84,19 +115,24 @@ export async function createUnlockCheckout(
 
     const user = await tx.user.findUnique({
       where: { id: userId },
-      select: { name: true, email: true, proUnlockedAt: true },
+      select: {
+        name: true,
+        email: true,
+        plan: true,
+        planUnlockedAt: true,
+      },
     });
 
     if (!user) {
       throw new HttpError(404, "Not found");
     }
 
-    if (isProUser(user)) {
+    if (planRank(targetPlan) <= planRank(user.plan)) {
       throw new HttpError(
         409,
-        "Your account already has unlimited gifts.",
+        "You're already on this plan or a higher one.",
         undefined,
-        "ALREADY_PRO",
+        "PLAN_NOT_UPGRADABLE",
       );
     }
 
@@ -104,6 +140,7 @@ export async function createUnlockCheckout(
     const pending = await tx.purchase.findFirst({
       where: {
         userId,
+        plan: targetPlan,
         status: "PENDING",
         billCode: { not: null },
         createdAt: { gte: recent },
@@ -117,13 +154,17 @@ export async function createUnlockCheckout(
         existingBillCode: pending.billCode,
         purchase: null,
         user,
+        plan: targetPlan,
       };
     }
+
+    const definition = PLAN_CONFIG[targetPlan];
 
     const purchase = await tx.purchase.create({
       data: {
         userId,
-        amountSen: UNLOCK_PRICE_SEN,
+        plan: targetPlan,
+        amountSen: definition.priceSen,
         currency: UNLOCK_CURRENCY,
         externalReference: randomBytes(16).toString("hex"),
       },
@@ -134,6 +175,7 @@ export async function createUnlockCheckout(
       existingBillCode: null,
       purchase: { id: purchase.id, externalReference: purchase.externalReference },
       user,
+      plan: targetPlan,
     };
   });
 
@@ -145,11 +187,13 @@ export async function createUnlockCheckout(
     throw new HttpError(500, "We couldn't start the payment. Please try again.");
   }
 
+  const definition = PLAN_CONFIG[checkout.plan];
+
   try {
     const bill = await createToyyibPayBill({
-      name: "Hint Darling Pro",
-      description: "Unlock unlimited wishlist gifts",
-      amountSen: UNLOCK_PRICE_SEN,
+      name: `Hint Darling ${definition.shortLabel}`,
+      description: `Unlock ${definition.label}`,
+      amountSen: definition.priceSen,
       externalReference: checkout.purchase.externalReference,
       payerName: checkout.user.name,
       payerEmail: checkout.user.email,
@@ -203,7 +247,7 @@ interface ActivationInput {
   raw: Prisma.InputJsonValue;
 }
 
-/** Marks a purchase paid and upgrades the account exactly once. */
+/** Marks a purchase paid and raises the account's plan exactly once. */
 async function activatePurchase(
   purchaseId: string,
   input: ActivationInput,
@@ -213,7 +257,7 @@ async function activatePurchase(
 
     const purchase = await tx.purchase.findUnique({
       where: { id: purchaseId },
-      select: { userId: true, status: true },
+      select: { userId: true, status: true, plan: true },
     });
 
     if (!purchase || purchase.status === "PAID") {
@@ -235,9 +279,19 @@ async function activatePurchase(
       },
     });
 
+    const user = await tx.user.findUnique({
+      where: { id: purchase.userId },
+      select: { plan: true },
+    });
+
+    // A late callback for an older/lower tier must never downgrade the account.
+    if (!user || planRank(purchase.plan) <= planRank(user.plan)) {
+      return;
+    }
+
     await tx.user.update({
       where: { id: purchase.userId },
-      data: { proUnlockedAt: now },
+      data: { plan: purchase.plan, planUnlockedAt: now },
     });
   });
 }

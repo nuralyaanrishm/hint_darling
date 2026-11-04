@@ -340,12 +340,18 @@ describe("gift claiming", () => {
     });
     assert.ok(claimRow.claimantUserId, "registered claimant is recorded");
 
-    // The owner's own event detail must not expose the gift-giver.
+    // The owner's own event detail must not expose the gift-giver. Free owners
+    // get no claim identity at all, not even the account name.
     const ownerEvent = await owner.request("GET", `/api/events/${eventId}`);
     assert.equal(ownerEvent.status, 200);
     const serialised = JSON.stringify(ownerEvent.body);
     assert.equal(serialised.includes("Secret Account Giver"), false);
-    assert.equal(serialised.includes("claimant"), false);
+    assert.equal(serialised.includes("claimantUserId"), false);
+    assert.equal(serialised.includes("claimTokenHash"), false);
+    const ownerItem = (ownerEvent.body.event.wishlist.items as any[]).find(
+      (item: any) => item.id === itemId,
+    );
+    assert.equal(ownerItem.claimantName, null);
 
     const publicView = await guestA.request(
       "GET",

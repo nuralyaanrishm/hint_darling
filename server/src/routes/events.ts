@@ -2,7 +2,11 @@ import { Router } from "express";
 import type { Request } from "express";
 import { HttpError } from "../lib/errors.js";
 import { getOwnedEvent, getOwnedWishlist } from "../lib/ownership.js";
-import { isProUser } from "../lib/plans.js";
+import {
+  PLAN_CONFIG,
+  activeWishlistLimitFor,
+  hasClaimTracking,
+} from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   toEventDto,
@@ -22,10 +26,12 @@ import { currentUserId, requireAuth } from "../middleware/auth.js";
 
 export const eventsRouter = Router();
 
-// Claim insights are a Pro feature; the serializer uses this to decide whether
-// claimed counts and per-item claim status are included in owner responses.
+// Claim insights are a Plus/Pro feature; the serializer uses this to decide
+// whether claimed counts and per-item claim status are included in responses.
 function ownerViewer(req: Request): OwnerViewer {
-  return { isPro: isProUser(req.auth?.user) };
+  return {
+    canViewClaims: req.auth ? hasClaimTracking(req.auth.user.plan) : false,
+  };
 }
 
 // Every event route requires a signed-in owner.
@@ -79,8 +85,11 @@ eventsRouter.post("/", async (req, res) => {
 
 // GET /api/events/:eventId — event detail with its wishlist and items.
 eventsRouter.get("/:eventId", async (req, res) => {
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
-  res.json({ event: toEventDto(event, ownerViewer(req)) });
+  const viewer = ownerViewer(req);
+  const event = await getOwnedEvent(currentUserId(req), req.params.eventId, {
+    includeClaimantName: viewer.canViewClaims,
+  });
+  res.json({ event: toEventDto(event, viewer) });
 });
 
 // PATCH /api/events/:eventId — update an event.
@@ -101,8 +110,11 @@ eventsRouter.patch("/:eventId", async (req, res) => {
     },
   });
 
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
-  res.json({ event: toEventDto(event, ownerViewer(req)) });
+  const viewer = ownerViewer(req);
+  const event = await getOwnedEvent(currentUserId(req), req.params.eventId, {
+    includeClaimantName: viewer.canViewClaims,
+  });
+  res.json({ event: toEventDto(event, viewer) });
 });
 
 // DELETE /api/events/:eventId — delete an event (cascades to wishlist/items).
@@ -113,8 +125,13 @@ eventsRouter.delete("/:eventId", async (req, res) => {
 });
 
 // POST /api/events/:eventId/wishlist — create the event's wishlist.
+//
+// Each plan includes a set number of active wishlists (Free 1, Plus 3, Pro
+// unlimited). The user row is locked while we count and create so two
+// simultaneous requests cannot both slip through on the last slot.
 eventsRouter.post("/:eventId/wishlist", async (req, res) => {
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
+  const userId = currentUserId(req);
+  const event = await getOwnedEvent(userId, req.params.eventId);
 
   if (event.wishlist) {
     throw new HttpError(409, "This event already has a wishlist.");
@@ -122,15 +139,46 @@ eventsRouter.post("/:eventId/wishlist", async (req, res) => {
 
   const data = parseOrThrow(createWishlistSchema, req.body);
 
-  const wishlist = await prisma.wishlist.create({
-    data: {
-      eventId: event.id,
-      title: data.title,
-      description: data.description ?? null,
-      privacyMode: data.privacyMode ?? "LINK_ONLY",
-      shareToken: generateToken(),
-    },
-    include: { items: true },
+  const wishlist = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+
+    const owner = await tx.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { plan: true },
+    });
+
+    const limit = activeWishlistLimitFor(owner.plan);
+
+    if (limit !== null) {
+      const activeCount = await tx.wishlist.count({
+        where: { isActive: true, event: { ownerId: userId } },
+      });
+
+      if (activeCount >= limit) {
+        const nextPlan = owner.plan === "FREE" ? "PLUS" : "PRO";
+        const next = PLAN_CONFIG[nextPlan];
+        const price = (next.priceSen / 100).toFixed(2);
+        const noun = limit === 1 ? "wishlist" : "wishlists";
+
+        throw new HttpError(
+          402,
+          `Your ${PLAN_CONFIG[owner.plan].label} plan includes ${limit} active ${noun}. Upgrade to ${next.label} for more from RM${price}.`,
+          undefined,
+          "WISHLIST_LIMIT_REACHED",
+        );
+      }
+    }
+
+    return tx.wishlist.create({
+      data: {
+        eventId: event.id,
+        title: data.title,
+        description: data.description ?? null,
+        privacyMode: data.privacyMode ?? "LINK_ONLY",
+        shareToken: generateToken(),
+      },
+      include: { items: true },
+    });
   });
 
   res.status(201).json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
@@ -155,6 +203,11 @@ eventsRouter.patch("/:eventId/wishlist", async (req, res) => {
     },
   });
 
-  const wishlist = await getOwnedWishlist(currentUserId(req), event.wishlist.id);
-  res.json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
+  const viewer = ownerViewer(req);
+  const wishlist = await getOwnedWishlist(
+    currentUserId(req),
+    event.wishlist.id,
+    { includeClaimantName: viewer.canViewClaims },
+  );
+  res.json({ wishlist: toWishlistDto(wishlist, viewer) });
 });

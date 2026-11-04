@@ -28,8 +28,8 @@ const statCards = computed(() => {
       hint: `${data.counts.verifiedUsers} verified`,
     },
     {
-      label: "Pro members",
-      value: data.counts.proUsers,
+      label: "Paid members",
+      value: data.counts.paidUsers,
       hint: `${data.revenue.paidPurchases} paid unlocks`,
     },
     {
@@ -111,7 +111,7 @@ onMounted(() => {
         The whole picture
       </h1>
       <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink/70">
-        Read-only overview of accounts, gift activity and Pro unlocks.
+        Read-only overview of accounts, gift activity and plan purchases.
         Reservations stay anonymous here: you see that a gift was claimed, never
         by whom.
       </p>
@@ -169,7 +169,7 @@ onMounted(() => {
                 <span
                   class="rounded-full px-2.5 py-1 font-medium uppercase tracking-[0.14em]"
                   :class="
-                    signup.plan === 'PRO'
+                    signup.plan !== 'FREE'
                       ? 'bg-rose/10 text-rose-deep'
                       : 'bg-blush/70 text-ink/70'
                   "
@@ -222,7 +222,7 @@ onMounted(() => {
 
         <BaseCard flush class="overflow-hidden lg:col-span-2">
           <div class="border-b border-blush/70 px-6 py-5">
-            <h2 class="font-display text-2xl text-ink">Recent Pro unlocks</h2>
+            <h2 class="font-display text-2xl text-ink">Recent purchases</h2>
             <p class="mt-1 text-xs text-ink/55">
               {{ overview.revenue.paidPurchases }} paid ·
               {{ formatAmount(overview.revenue.grossSen, overview.revenue.currency) }}
@@ -249,7 +249,7 @@ onMounted(() => {
           </ul>
 
           <p v-else class="px-6 py-8 text-sm text-ink/60">
-            No Pro purchases yet.
+            No purchases yet.
           </p>
         </BaseCard>
       </div>

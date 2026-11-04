@@ -1,4 +1,5 @@
 import type { Response } from "express";
+import type { PlanTierName } from "./plans.js";
 import { prisma } from "./prisma.js";
 import { generateToken, hashToken } from "./tokens.js";
 
@@ -87,7 +88,8 @@ export interface ValidSession {
     name: string;
     email: string;
     createdAt: Date;
-    proUnlockedAt: Date | null;
+    plan: PlanTierName;
+    planUnlockedAt: Date | null;
   };
 }
 
@@ -107,7 +109,8 @@ export async function findValidSession(
           name: true,
           email: true,
           createdAt: true,
-          proUnlockedAt: true,
+          plan: true,
+          planUnlockedAt: true,
         },
       },
     },

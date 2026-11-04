@@ -3,6 +3,8 @@
 // Session cookies are HTTP-only, and unsafe requests echo the CSRF cookie back
 // in the X-CSRF-Token header (the server enforces this on every mutation).
 
+import type { PlanDefinition, PlanFeatures, PlanTier } from "./plans";
+
 const CSRF_COOKIE = "hd_csrf";
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -16,18 +18,24 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  plan: "FREE" | "PRO";
-  proUnlockedAt: string | null;
+  plan: PlanTier;
+  planUnlockedAt: string | null;
   /** True when this account's email is on the server's ADMIN_EMAILS allowlist. */
   isAdmin: boolean;
   createdAt: string;
 }
 
 export interface BillingSummary {
-  plan: "FREE" | "PRO";
-  proUnlockedAt: string | null;
-  freeItemLimit: number;
-  priceSen: number;
+  plan: PlanTier;
+  planLabel: string;
+  planUnlockedAt: string | null;
+  activeWishlistLimit: number | null;
+  itemLimit: number | null;
+  features: PlanFeatures;
+  comingSoon: string[];
+  isPaid: boolean;
+  prices: Record<PlanTier, number>;
+  plans: PlanDefinition[];
   currency: string;
 }
 
@@ -168,16 +176,19 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-/** The caller's plan, free item limit and one-time unlock price. */
+/** The caller's plan, limits, features and price catalog. */
 export async function getBilling(): Promise<BillingSummary> {
   const data = await request<{ billing: BillingSummary }>("/billing");
   return data.billing;
 }
 
-/** Starts a one-time RM1 ToyyibPay checkout and returns its hosted URL. */
-export async function createUnlockCheckout(): Promise<{ paymentUrl: string }> {
-  return request<{ paymentUrl: string }>("/billing/unlock", {
+/** Starts a one-time Plus/Pro ToyyibPay checkout and returns its hosted URL. */
+export async function createPlanCheckout(
+  plan: Exclude<PlanTier, "FREE">,
+): Promise<{ paymentUrl: string }> {
+  return request<{ paymentUrl: string }>("/billing/checkout", {
     method: "POST",
+    body: JSON.stringify({ plan }),
   });
 }
 
@@ -290,10 +301,15 @@ export interface WishlistItemDto {
   quantity: number;
   notes: string | null;
   position: number;
-  /** True when a gift-giver has reserved this gift. Never reveals who. */
+  /** True when a gift-giver has reserved this gift. */
   isClaimed: boolean;
   /** Number of active claims on this gift. At most one in this version. */
   claimedCount: number;
+  /**
+   * The optional display name of the gift-giver. Only present for Pro owners;
+   * `null` for Free owners, unnamed guests, or unclaimed gifts.
+   */
+  claimantName: string | null;
   /** True when the owner's plan doesn't include claim insights. */
   claimsLocked: boolean;
   createdAt: string;
@@ -477,9 +493,8 @@ export async function reorderWishlistItems(
 
 /**
  * A gift as it is shown to guests. Deliberately narrower than `WishlistItemDto`:
- * private owner notes and any gift-giver information are never included, and
- * `claimedCount`/`isClaimed` describe availability without revealing who
- * claimed what.
+ * any gift-giver information is never included, and `claimedCount`/`isClaimed`
+ * describe availability without revealing who claimed what.
  */
 export interface PublicGift {
   id: string;
@@ -492,6 +507,7 @@ export interface PublicGift {
   preferredColour: string | null;
   preferredSize: string | null;
   preferredVariation: string | null;
+  notes: string | null;
   quantity: number;
   claimedCount: number;
   /** True when the gift has been reserved by a gift-giver. */
@@ -658,7 +674,7 @@ export interface AdminOverview {
   counts: {
     users: number;
     verifiedUsers: number;
-    proUsers: number;
+    paidUsers: number;
     events: number;
     wishlists: number;
     items: number;
@@ -673,7 +689,7 @@ export interface AdminOverview {
     id: string;
     name: string;
     email: string;
-    plan: "FREE" | "PRO";
+    plan: PlanTier;
     eventCount: number;
     createdAt: string;
   }[];

@@ -1,27 +1,39 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseModal from "@/components/ui/BaseModal.vue";
-import { createUnlockCheckout, isApiError } from "@/lib/api";
+import { createPlanCheckout, isApiError } from "@/lib/api";
+import {
+  PLAN_CATALOG,
+  PLAN_FEATURE_LABELS,
+  PLAN_FEATURE_ORDER,
+  formatPlanPrice,
+  type PlanFeatureKey,
+  type PlanTier,
+} from "@/lib/plans";
 
 const open = defineModel<boolean>({ required: true });
 
-const props = withDefaults(
-  defineProps<{
-    priceSen?: number;
-  }>(),
-  {
-    priceSen: 100,
-  },
-);
+const props = defineProps<{
+  plan: Exclude<PlanTier, "FREE">;
+}>();
 
 const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
 
-const priceLabel = () => {
-  const amount = props.priceSen / 100;
-  return `RM${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
-};
+const definition = computed(() => PLAN_CATALOG[props.plan]);
+
+const benefits = computed(() =>
+  PLAN_FEATURE_ORDER.filter((key) => definition.value.features[key]).map(
+    (key) => ({
+      key,
+      label: PLAN_FEATURE_LABELS[key],
+      comingSoon: definition.value.comingSoon.includes(key as PlanFeatureKey),
+    }),
+  ),
+);
+
+const priceLabel = computed(() => formatPlanPrice(definition.value.priceSen));
 
 watch(open, (isOpen) => {
   if (isOpen) {
@@ -37,7 +49,7 @@ async function pay() {
   errorMessage.value = null;
 
   try {
-    const { paymentUrl } = await createUnlockCheckout();
+    const { paymentUrl } = await createPlanCheckout(props.plan);
     window.location.assign(paymentUrl);
   } catch (error) {
     if (isApiError(error)) {
@@ -52,49 +64,38 @@ async function pay() {
 </script>
 
 <template>
-  <BaseModal v-model="open" title="Unlock Pro" size="sm">
+  <BaseModal
+    v-model="open"
+    :title="`Upgrade to ${definition.label}`"
+    size="sm"
+  >
     <p class="text-sm leading-relaxed text-ink/75">
-      Free wishlists hold up to five gifts and don't include claim insights.
-      Unlock your account once to add as many gifts as you like and see how many
-      have been claimed.
+      One payment of {{ priceLabel }}, yours forever. No subscription and no
+      renewal.
     </p>
 
     <ul class="mt-5 space-y-3 text-sm text-ink/75">
-      <li class="flex items-start gap-3">
+      <li
+        v-for="benefit in benefits"
+        :key="benefit.key"
+        class="flex items-start gap-3"
+      >
         <span
+          v-if="!benefit.comingSoon"
           class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
           aria-hidden="true"
         >
           ✓
         </span>
-        Unlimited gifts on every wishlist
-      </li>
-      <li class="flex items-start gap-3">
-        <span
-          class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-          aria-hidden="true"
-        >
-          ✓
+        <span>
+          {{ benefit.label }}
+          <span
+            v-if="benefit.comingSoon"
+            class="ml-1 rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/60"
+          >
+            Soon
+          </span>
         </span>
-        See how many gifts have been claimed
-      </li>
-      <li class="flex items-start gap-3">
-        <span
-          class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-          aria-hidden="true"
-        >
-          ✓
-        </span>
-        One payment, yours forever
-      </li>
-      <li class="flex items-start gap-3">
-        <span
-          class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sage text-sage-deep"
-          aria-hidden="true"
-        >
-          ✓
-        </span>
-        Secure FPX or card payment via ToyyibPay
       </li>
     </ul>
 
@@ -116,7 +117,7 @@ async function pay() {
           Not now
         </BaseButton>
         <BaseButton :disabled="submitting" @click="pay">
-          {{ submitting ? "Redirecting…" : `Unlock for ${priceLabel()}` }}
+          {{ submitting ? "Redirecting…" : `Continue for ${priceLabel}` }}
         </BaseButton>
       </div>
     </template>

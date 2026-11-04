@@ -16,6 +16,13 @@
   --color-sage: #dce8dc;
   --color-sage-deep: #7e9b7e;
 
+  /* Pricing table (matches the Plans & Pricing artwork) */
+  --color-plan-free: #b7cdbd;
+  --color-plan-plus: #e7a9ad;
+  --color-plan-pro: #f2dd9e;
+  --color-plan-popular: #1f7a48;
+  --color-plan-row: #fbeef0;
+
   /* Typography */
   --font-display: "Cormorant Garamond", "Times New Roman", Georgia, serif;
   --font-sans:

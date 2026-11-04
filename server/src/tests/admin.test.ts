@@ -132,7 +132,7 @@ describe("admin overview payload", () => {
     for (const key of [
       "users",
       "verifiedUsers",
-      "proUsers",
+      "paidUsers",
       "events",
       "wishlists",
       "items",

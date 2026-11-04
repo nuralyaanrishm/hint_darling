@@ -136,7 +136,8 @@ const details = computed(() =>
           <path d="M8 10V7a4 4 0 0 1 8 0v3" />
         </svg>
         <p class="leading-snug">
-          Claim status hidden — unlock Pro to see how many gifts are claimed.
+          Claim status hidden — upgrade to Plus or Pro to see how many gifts
+          are claimed.
         </p>
       </div>
       <div
@@ -155,7 +156,11 @@ const details = computed(() =>
         />
         <p class="leading-snug">
           <span v-if="item.isClaimed">
-            Claimed — someone's getting you this gift! 🎁
+            Claimed by
+            <span class="font-medium">{{
+              item.claimantName || "a gift-giver"
+            }}</span>
+            — someone's getting you this gift! 🎁
           </span>
           <span v-else>Available — still waiting to be chosen. 💝</span>
         </p>

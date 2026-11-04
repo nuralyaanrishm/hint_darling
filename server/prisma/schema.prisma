@@ -40,6 +40,13 @@ enum ClaimStatus {
   CANCELLED
 }
 
+/// One-time paid tiers. FREE is the default and cannot be bought.
+enum PlanTier {
+  FREE
+  PLUS
+  PRO
+}
+
 model User {
   id              String    @id @default(cuid())
   name            String
@@ -51,8 +58,10 @@ model User {
   /// Set once the signup OTP is confirmed or Google proves the address. Unverified
   /// accounts cannot sign in with a password.
   emailVerifiedAt DateTime?
-  /// Set when the account buys the one-time Pro unlock. Null means the free plan.
-  proUnlockedAt   DateTime?
+  /// Current one-time plan. FREE by default; PLUS/PRO after a paid upgrade.
+  plan            PlanTier  @default(FREE)
+  /// Set when the account first buys a paid plan.
+  planUnlockedAt  DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -204,14 +213,16 @@ enum PurchaseStatus {
   FAILED
 }
 
-/// A one-time ToyyibPay purchase that unlocks unlimited wishlist items.
+/// A one-time ToyyibPay purchase that unlocks a paid plan.
 /// The raw ToyyibPay callback is kept for auditing and idempotent replay.
 model Purchase {
   id                String         @id @default(cuid())
   userId            String
   status            PurchaseStatus @default(PENDING)
-  /// Price in sen (RM1.00 = 100). Never accepted from the client.
-  amountSen         Int            @default(100)
+  /// The tier this purchase unlocks. Older rows were all Pro unlocks.
+  plan              PlanTier       @default(PRO)
+  /// Price in sen (RM9.90 = 990). Never accepted from the client.
+  amountSen         Int
   currency          String         @default("MYR") @db.VarChar(3)
   /// Opaque reference sent to ToyyibPay as billExternalReferenceNo.
   externalReference String         @unique

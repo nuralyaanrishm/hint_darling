@@ -24,7 +24,7 @@ import {
   type GoogleProfile,
 } from "../lib/googleOAuth.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
-import { isProUser } from "../lib/plans.js";
+import type { PlanTierName } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   SESSION_COOKIE,
@@ -62,8 +62,8 @@ interface PublicUser {
   id: string;
   name: string;
   email: string;
-  plan: "FREE" | "PRO";
-  proUnlockedAt: string | null;
+  plan: PlanTierName;
+  planUnlockedAt: string | null;
   isAdmin: boolean;
   createdAt: string;
 }
@@ -72,15 +72,16 @@ function toPublicUser(user: {
   id: string;
   name: string;
   email: string;
-  proUnlockedAt: Date | null;
+  plan: PlanTierName;
+  planUnlockedAt: Date | null;
   createdAt: Date;
 }): PublicUser {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
-    plan: isProUser(user) ? "PRO" : "FREE",
-    proUnlockedAt: user.proUnlockedAt?.toISOString() ?? null,
+    plan: user.plan,
+    planUnlockedAt: user.planUnlockedAt?.toISOString() ?? null,
     // Only ever describes the caller; the admin list itself is never exposed.
     isAdmin: isAdminEmail(user.email),
     createdAt: user.createdAt.toISOString(),

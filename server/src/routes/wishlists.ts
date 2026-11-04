@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 import { HttpError } from "../lib/errors.js";
 import { getOwnedWishlist } from "../lib/ownership.js";
-import { FREE_ITEM_LIMIT, isProUser } from "../lib/plans.js";
+import { PLAN_CONFIG, hasClaimTracking, itemLimitFor } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   toWishlistDto,
@@ -20,10 +20,12 @@ import { currentUserId, requireAuth } from "../middleware/auth.js";
 
 export const wishlistsRouter = Router();
 
-// Claim insights are a Pro feature; the serializer uses this to decide whether
-// claimed counts and per-item claim status are included in owner responses.
+// Claim insights are a Plus/Pro feature; the serializer uses this to decide
+// whether claimed counts and per-item claim status are included in responses.
 function ownerViewer(req: Request): OwnerViewer {
-  return { isPro: isProUser(req.auth?.user) };
+  return {
+    canViewClaims: req.auth ? hasClaimTracking(req.auth.user.plan) : false,
+  };
 }
 
 // Every wishlist and item route requires a signed-in owner.
@@ -31,11 +33,13 @@ wishlistsRouter.use(requireAuth);
 
 // GET /api/wishlists/:wishlistId — wishlist detail with its items.
 wishlistsRouter.get("/:wishlistId", async (req, res) => {
+  const viewer = ownerViewer(req);
   const wishlist = await getOwnedWishlist(
     currentUserId(req),
     req.params.wishlistId,
+    { includeClaimantName: viewer.canViewClaims },
   );
-  res.json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
+  res.json({ wishlist: toWishlistDto(wishlist, viewer) });
 });
 
 // PATCH /api/wishlists/:wishlistId — update title/description.
@@ -55,15 +59,19 @@ wishlistsRouter.patch("/:wishlistId", async (req, res) => {
     },
   });
 
-  const wishlist = await getOwnedWishlist(currentUserId(req), owned.id);
-  res.json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
+  const viewer = ownerViewer(req);
+  const wishlist = await getOwnedWishlist(currentUserId(req), owned.id, {
+    includeClaimantName: viewer.canViewClaims,
+  });
+  res.json({ wishlist: toWishlistDto(wishlist, viewer) });
 });
 
 // POST /api/wishlists/:wishlistId/items — append a gift item.
 //
-// Free accounts may add at most FREE_ITEM_LIMIT items per wishlist. The count
-// and insert run inside one transaction with the wishlist row locked, so two
-// simultaneous requests cannot both slip through on the last free slot.
+// Free accounts may add at most their plan's item limit per wishlist. Paid
+// tiers are unlimited. The count and insert run inside one transaction with the
+// wishlist row locked, so two simultaneous requests cannot both slip through on
+// the last free slot.
 wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
   const userId = currentUserId(req);
   const wishlist = await getOwnedWishlist(userId, req.params.wishlistId);
@@ -80,18 +88,21 @@ wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
 
     const owner = await tx.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { proUnlockedAt: true },
+      select: { plan: true },
     });
 
-    if (!isProUser(owner)) {
+    const itemLimit = itemLimitFor(owner.plan);
+
+    if (itemLimit !== null) {
       const itemCount = await tx.wishlistItem.count({
         where: { wishlistId: wishlist.id },
       });
 
-      if (itemCount >= FREE_ITEM_LIMIT) {
+      if (itemCount >= itemLimit) {
+        const plusPrice = PLAN_CONFIG.PLUS.priceSen / 100;
         throw new HttpError(
           402,
-          `Your free plan includes ${FREE_ITEM_LIMIT} gifts per wishlist. Unlock unlimited gifts for RM1.`,
+          `Your ${PLAN_CONFIG[owner.plan].label} plan includes ${itemLimit} gifts per wishlist. Upgrade to Darling Plus for unlimited gifts from RM${plusPrice.toFixed(2)}.`,
           undefined,
           "ITEM_LIMIT_REACHED",
         );
@@ -163,8 +174,11 @@ wishlistsRouter.patch("/:wishlistId/items/reorder", async (req, res) => {
     ),
   );
 
-  const fresh = await getOwnedWishlist(currentUserId(req), wishlist.id);
-  res.json({ wishlist: toWishlistDto(fresh, ownerViewer(req)) });
+  const viewer = ownerViewer(req);
+  const fresh = await getOwnedWishlist(currentUserId(req), wishlist.id, {
+    includeClaimantName: viewer.canViewClaims,
+  });
+  res.json({ wishlist: toWishlistDto(fresh, viewer) });
 });
 
 // PATCH /api/wishlists/:wishlistId/items/:itemId — update a gift item.
@@ -183,6 +197,7 @@ wishlistsRouter.patch("/:wishlistId/items/:itemId", async (req, res) => {
     throw new HttpError(404, "Not found");
   }
 
+  const viewer = ownerViewer(req);
   const updated = await prisma.wishlistItem.update({
     where: { id: item.id },
     data: {
@@ -198,10 +213,17 @@ wishlistsRouter.patch("/:wishlistId/items/:itemId", async (req, res) => {
       quantity: data.quantity,
       notes: data.notes,
     },
-    include: { claims: { where: { status: "CLAIMED" }, select: { id: true } } },
+    include: {
+      claims: {
+        where: { status: "CLAIMED" },
+        select: viewer.canViewClaims
+          ? { id: true, claimantName: true }
+          : { id: true },
+      },
+    },
   });
 
-  res.json({ item: toWishlistItemDto(updated, ownerViewer(req)) });
+  res.json({ item: toWishlistItemDto(updated, viewer) });
 });
 
 // DELETE /api/wishlists/:wishlistId/items/:itemId — remove a gift item.

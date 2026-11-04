@@ -5,9 +5,9 @@ import { prisma } from "./prisma.js";
 //
 // This module is the single place that decides what a guest may see. It never
 // returns the owner, the owner's email or any account data, the internal
-// wishlist/event ids, the share token, private item notes, or any information
-// about who claimed a gift. Only records that are explicitly meant to be public
-// are returned: an unknown, inactive or private list is treated as missing.
+// wishlist/event ids, the share token, or any information about who claimed a
+// gift. Only records that are explicitly meant to be public are returned: an
+// unknown, inactive or private list is treated as missing.
 
 const itemOrder = [
   { position: "asc" as const },
@@ -30,6 +30,7 @@ export interface PublicGiftDto {
   preferredColour: string | null;
   preferredSize: string | null;
   preferredVariation: string | null;
+  notes: string | null;
   quantity: number;
   /** Active claim count. In this version at most one claim can be active. */
   claimedCount: number;
@@ -68,6 +69,7 @@ interface PublicWishlistItemRecord {
   preferredColour: string | null;
   preferredSize: string | null;
   preferredVariation: string | null;
+  notes: string | null;
   quantity: number;
   claims: { id: string }[];
 }
@@ -107,6 +109,7 @@ function toPublicGiftDto(item: PublicWishlistItemRecord): PublicGiftDto {
     preferredColour: item.preferredColour,
     preferredSize: item.preferredSize,
     preferredVariation: item.preferredVariation,
+    notes: item.notes,
     quantity: item.quantity,
     claimedCount,
     isClaimed,
@@ -183,6 +186,7 @@ export async function loadPublicWishlist(
           preferredColour: true,
           preferredSize: true,
           preferredVariation: true,
+          notes: true,
           quantity: true,
           // Only the existence of a claim is needed; claimant details are never
           // selected, so they cannot leak into any response.

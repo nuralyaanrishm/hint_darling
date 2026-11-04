@@ -138,6 +138,13 @@ const showCount = computed(
         {{ gift.description }}
       </p>
 
+      <p
+        v-if="gift.notes"
+        class="mt-3 rounded-2xl bg-cream px-3 py-2 text-sm italic leading-relaxed text-ink/70"
+      >
+        {{ gift.notes }}
+      </p>
+
       <ul v-if="details.length" class="mt-3 flex flex-wrap gap-2">
         <li
           v-for="detail in details"

@@ -11,7 +11,7 @@ import type { EventType, PrivacyMode } from "@prisma/client";
  * "unlock Pro" prompt instead.
  */
 export interface OwnerViewer {
-  isPro: boolean;
+  canViewClaims: boolean;
 }
 
 interface ItemRecord {
@@ -31,10 +31,11 @@ interface ItemRecord {
   createdAt: Date;
   updatedAt: Date;
   /**
-   * Active claims, selected as ids only. Claimant names, user ids and tokens
-   * are deliberately never loaded for owner views, so they cannot leak.
+   * Active claims. Raw user ids and management tokens are never selected for
+   * owner views. The optional display name is only loaded for Pro owners, who
+   * are allowed to see who reserved a gift.
    */
-  claims?: { id: string }[] | null;
+  claims?: { id: string; claimantName?: string | null }[] | null;
 }
 
 interface WishlistRecord {
@@ -76,10 +77,15 @@ export interface WishlistItemDto {
   quantity: number;
   notes: string | null;
   position: number;
-  /** True when a gift-giver has reserved this gift. Never reveals who. */
+  /** True when a gift-giver has reserved this gift. */
   isClaimed: boolean;
   /** Number of active claims. At most one in this version. */
   claimedCount: number;
+  /**
+   * The optional display name of the gift-giver. Only present for Pro owners;
+   * `null` for Free owners, unnamed guests, or unclaimed gifts.
+   */
+  claimantName: string | null;
   /** True when the owner's plan doesn't include claim insights. */
   claimsLocked: boolean;
   createdAt: string;
@@ -90,11 +96,15 @@ export function toWishlistItemDto(
   item: ItemRecord,
   viewer: OwnerViewer,
 ): WishlistItemDto {
-  // Only active claim ids are ever selected for owner views; the claimant's
-  // identity (name, user id, token) is never loaded or serialised. Free owners
-  // are not told about claims at all until they unlock Pro.
-  const claimsLocked = !viewer.isPro;
+  // Active claim ids and (for Pro owners) the optional claimant display name
+  // are loaded for owner views; the claimant's user id and management token are
+  // never selected or serialised. Free owners are not told about claims at all
+  // until they unlock Pro.
+  const claimsLocked = !viewer.canViewClaims;
   const claimedCount = claimsLocked ? 0 : (item.claims?.length ?? 0);
+  const claimantName = claimsLocked
+    ? null
+    : (item.claims?.find((claim) => claim.claimantName)?.claimantName ?? null);
 
   return {
     id: item.id,
@@ -112,6 +122,7 @@ export function toWishlistItemDto(
     position: item.position,
     isClaimed: claimedCount > 0,
     claimedCount,
+    claimantName,
     claimsLocked,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
@@ -146,7 +157,7 @@ export function toWishlistDto(
     shareToken: wishlist.shareToken,
     privacyMode: wishlist.privacyMode,
     isActive: wishlist.isActive,
-    claimsLocked: !viewer.isPro,
+    claimsLocked: !viewer.canViewClaims,
     items: wishlist.items.map((item) => toWishlistItemDto(item, viewer)),
     createdAt: wishlist.createdAt.toISOString(),
     updatedAt: wishlist.updatedAt.toISOString(),
@@ -203,10 +214,10 @@ export function toEventSummaryDto(
           id: event.wishlist.id,
           title: event.wishlist.title,
           itemCount: event.wishlist._count.items,
-          claimedCount: viewer.isPro
+          claimedCount: viewer.canViewClaims
             ? (event.wishlist.items?.length ?? 0)
             : 0,
-          claimsLocked: !viewer.isPro,
+          claimsLocked: !viewer.canViewClaims,
         }
       : null,
     createdAt: event.createdAt.toISOString(),
