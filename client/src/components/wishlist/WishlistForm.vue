@@ -106,14 +106,7 @@ function onSubmit() {
         required
         :error="fieldErrors.title"
       />
-      <BaseTextarea
-        id="wishlist-description"
-        v-model="form.description"
-        label="Description (optional)"
-        placeholder="A few words for your guests"
-        :rows="3"
-        :error="fieldErrors.description"
-      />
+    
       <BaseSelect
         id="wishlist-privacy"
         v-model="form.privacyMode"
