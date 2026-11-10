@@ -55,6 +55,7 @@ interface EventRecord {
   name: string;
   type: EventType;
   eventDate: Date | null;
+  eventStartsAt: Date | null;
   description: string | null;
   location: string | null;
   latitude: number | null;
@@ -179,6 +180,8 @@ export interface EventSummaryDto {
   name: string;
   type: EventType;
   eventDate: string | null;
+  /** Absolute instant the celebration starts; claiming closes at this moment. */
+  startsAt: string | null;
   description: string | null;
   location: string | null;
   latitude: number | null;
@@ -205,6 +208,7 @@ export function toEventSummaryDto(
     name: event.name,
     type: event.type,
     eventDate: event.eventDate?.toISOString() ?? null,
+    startsAt: event.eventStartsAt?.toISOString() ?? null,
     description: event.description,
     location: event.location,
     latitude: event.latitude,
@@ -240,6 +244,7 @@ export function toEventDto(
     name: event.name,
     type: event.type,
     eventDate: event.eventDate?.toISOString() ?? null,
+    startsAt: event.eventStartsAt?.toISOString() ?? null,
     description: event.description,
     location: event.location,
     latitude: event.latitude,

@@ -5,6 +5,7 @@ import BaseInput from "@/components/ui/BaseInput.vue";
 import BaseModal from "@/components/ui/BaseModal.vue";
 import {
   ALREADY_CLAIMED_CODE,
+  EVENT_STARTED_CODE,
   claimGift,
   isApiError,
   type ClaimResult,
@@ -28,7 +29,7 @@ const emit = defineEmits<{
 const SUGGESTION =
   "Why not pick another gift instead? There are plenty more to make their day.";
 
-type Step = "confirm" | "success" | "conflict";
+type Step = "confirm" | "success" | "conflict" | "closed";
 
 const step = ref<Step>("confirm");
 const claimantName = ref("");
@@ -78,6 +79,10 @@ async function submit() {
     if (isApiError(error) && error.code === ALREADY_CLAIMED_CODE) {
       step.value = "conflict";
       emit("conflict");
+    } else if (isApiError(error) && error.code === EVENT_STARTED_CODE) {
+      // The event started between opening the dialog and confirming.
+      step.value = "closed";
+      errorMessage.value = error.message;
     } else if (isApiError(error)) {
       errorMessage.value = error.message;
     } else {
@@ -101,7 +106,7 @@ async function copyLink() {
 <template>
   <BaseModal
     v-model="open"
-    :title="step === 'success' ? 'It’s yours to give!' : step === 'conflict' ? 'Oh no!' : 'Sweet — let’s claim it'"
+    :title="step === 'success' ? 'It’s yours to give!' : step === 'conflict' ? 'Oh no!' : step === 'closed' ? 'Gifting has closed' : 'Sweet — let’s claim it'"
     size="sm"
   >
     <!-- Confirmation -->
@@ -196,6 +201,18 @@ async function copyLink() {
       </p>
     </div>
 
+    <!-- The event started while the dialog was open -->
+    <div v-else-if="step === 'closed'">
+      <p class="text-sm leading-relaxed text-ink/75">
+        The celebration has already started, so gifts can no longer be
+        reserved. 🎉
+      </p>
+      <p class="mt-3 text-sm leading-relaxed text-ink/55">
+        If you were hoping to give something, do reach out to the hosts
+        directly — and thank you for the thought.
+      </p>
+    </div>
+
     <template #footer>
       <div
         v-if="step === 'confirm'"
@@ -221,10 +238,17 @@ async function copyLink() {
       </div>
 
       <div
-        v-else
+        v-else-if="step === 'conflict'"
         class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"
       >
         <BaseButton @click="open = false">Choose another gift</BaseButton>
+      </div>
+
+      <div
+        v-else
+        class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"
+      >
+        <BaseButton @click="open = false">Close</BaseButton>
       </div>
     </template>
   </BaseModal>

@@ -542,3 +542,101 @@ describe("database constraint (one active claim per item)", () => {
     assert.equal(count, 0, "the failed transaction rolled back");
   });
 });
+// ---------------------------------------------------------------------------
+// Gifting window
+// ---------------------------------------------------------------------------
+
+async function setStartsAt(fixture: Fixture, startsAt: string | null) {
+  const response = await fixture.owner.request(
+    "PATCH",
+    `/api/events/${fixture.eventId}`,
+    { json: { startsAt } },
+  );
+  assert.equal(response.status, 200);
+  return response;
+}
+
+const pastInstant = () => new Date(Date.now() - 60_000).toISOString();
+const futureInstant = () => new Date(Date.now() + 60 * 60_000).toISOString();
+
+describe("gifting window", () => {
+  it("accepts claims before the event starts", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const fixture = await makeFixture("window-open");
+    await setStartsAt(fixture, futureInstant());
+
+    const response = await claim(fixture.guestA, fixture.shareToken, fixture.itemId, {
+      idempotencyKey: "key-window-open",
+    });
+
+    assert.equal(response.status, 201);
+  });
+
+  it("refuses claims once the event has started", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const fixture = await makeFixture("window-closed");
+    await setStartsAt(fixture, pastInstant());
+
+    const response = await claim(fixture.guestA, fixture.shareToken, fixture.itemId, {
+      claimantName: "Too Late",
+      idempotencyKey: "key-window-closed",
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, "EVENT_STARTED");
+    assert.match(response.body.error.message, /Gifting has closed/);
+
+    const active = await prisma.giftClaim.count({
+      where: { wishlistItemId: fixture.itemId, status: "CLAIMED" },
+    });
+    assert.equal(active, 0, "the gift stays unclaimed");
+
+    const visible = await fixture.guestA.request(
+      "GET",
+      `/api/public/wishlists/${fixture.shareToken}`,
+    );
+    assert.equal(visible.body.wishlist.items[0].isClaimed, false);
+  });
+
+  it("still resolves an idempotent retry of a claim made in time", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const fixture = await makeFixture("window-retry");
+    const first = await claim(fixture.guestA, fixture.shareToken, fixture.itemId, {
+      idempotencyKey: "key-window-retry",
+    });
+    assert.equal(first.status, 201);
+
+    await setStartsAt(fixture, pastInstant());
+
+    const retry = await claim(fixture.guestA, fixture.shareToken, fixture.itemId, {
+      idempotencyKey: "key-window-retry",
+    });
+
+    assert.equal(retry.status, 200, "a lost response can still be recovered");
+    assert.equal(retry.body.claim.id, first.body.claim.id);
+  });
+
+  it("still lets the gift-giver cancel after the start", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const fixture = await makeFixture("window-cancel");
+    const claimed = await claim(fixture.guestA, fixture.shareToken, fixture.itemId, {
+      idempotencyKey: "key-window-cancel",
+    });
+    assert.equal(claimed.status, 201);
+
+    await setStartsAt(fixture, pastInstant());
+
+    const cancelled = await fixture.guestA.request(
+      "POST",
+      `/api/public/claims/${claimed.body.claim.manageToken}/cancel`,
+      {},
+    );
+
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.claim.status, "CANCELLED");
+  });
+});

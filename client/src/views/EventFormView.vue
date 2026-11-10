@@ -10,6 +10,7 @@ import BowDivider from "@/components/decor/BowDivider.vue";
 import LocationMapPicker from "@/components/map/LocationMapPicker.vue";
 import LoadingState from "@/components/ui/LoadingState.vue";
 import { EVENT_TYPE_OPTIONS } from "@/lib/eventOptions";
+import { composeStartsAt, splitStartsAt } from "@/lib/eventTiming";
 import type { Coordinate } from "@/lib/map";
 import {
   createEvent,
@@ -33,6 +34,7 @@ const form = reactive({
   name: "",
   type: "" as EventType | "",
   eventDate: "",
+  eventTime: "",
   description: "",
   location: "",
   latitude: null as number | null,
@@ -70,6 +72,7 @@ function resetForm() {
   form.name = "";
   form.type = "";
   form.eventDate = "";
+  form.eventTime = "";
   form.description = "";
   form.location = "";
   form.latitude = null;
@@ -95,7 +98,15 @@ async function load() {
     const event = await getEvent(eventId.value);
     form.name = event.name;
     form.type = event.type;
-    form.eventDate = event.eventDate ? event.eventDate.slice(0, 10) : "";
+
+    // Once a start instant exists it owns both the date and the time, so the
+    // values the owner sees round-trip exactly. Older events only have the
+    // calendar date.
+    const startsAt = splitStartsAt(event.startsAt);
+    form.eventDate =
+      startsAt.date || (event.eventDate ? event.eventDate.slice(0, 10) : "");
+    form.eventTime = startsAt.time;
+
     form.description = event.description ?? "";
     form.location = event.location ?? "";
     form.latitude = event.latitude;
@@ -137,6 +148,7 @@ async function onSubmit() {
       name: form.name.trim(),
       type: eventType,
       eventDate: form.eventDate || null,
+      startsAt: composeStartsAt(form.eventDate, form.eventTime),
       description: form.description.trim() || null,
       location: form.location.trim() || null,
       latitude: form.latitude,
@@ -231,13 +243,29 @@ watch(() => route.fullPath, load);
           required
           :error="fieldErrors.type"
         />
-        <BaseInput
-          id="event-date"
-          v-model="form.eventDate"
-          label="Date (optional)"
-          type="date"
-          :error="fieldErrors.eventDate"
-        />
+        <div class="grid gap-4 sm:grid-cols-2">
+          <BaseInput
+            id="event-date"
+            v-model="form.eventDate"
+            label="Date (optional)"
+            type="date"
+            :error="fieldErrors.eventDate"
+          />
+          <div class="flex flex-col gap-1.5">
+            <BaseInput
+              id="event-time"
+              v-model="form.eventTime"
+              label="Start time (optional)"
+              type="time"
+              :disabled="!form.eventDate"
+              :error="fieldErrors.startsAt"
+            />
+            <p class="text-xs leading-relaxed text-ink/45">
+              Gifts can be reserved until the start time, then the wishlist
+              becomes read-only. Leave it blank for midnight.
+            </p>
+          </div>
+        </div>
         <LocationMapPicker
           v-model="coordinates"
           v-model:location="form.location"

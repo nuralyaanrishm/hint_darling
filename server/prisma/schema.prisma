@@ -114,18 +114,22 @@ model Session {
 }
 
 model Event {
-  id          String    @id @default(cuid())
-  ownerId     String
-  name        String
-  type        EventType
-  eventDate   DateTime?
-  description String?
-  location    String?
+  id            String    @id @default(cuid())
+  ownerId       String
+  name          String
+  type          EventType
+  /// Calendar date of the occasion, shown to guests.
+  eventDate     DateTime?
+  /// Exact moment the celebration starts. Gifts can be claimed until then and
+  /// the public wishlist counts down to it. Null means claiming never closes.
+  eventStartsAt DateTime?
+  description   String?
+  location      String?
   /// Optional map coordinates for the chosen location.
-  latitude    Float?
-  longitude   Float?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  latitude      Float?
+  longitude     Float?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   wishlist Wishlist?

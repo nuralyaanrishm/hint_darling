@@ -8,6 +8,7 @@ import BowDivider from "@/components/decor/BowDivider.vue";
 import FloralSprig from "@/components/decor/FloralSprig.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
 import EventLocationMap from "@/components/map/EventLocationMap.vue";
+import EventCountdown from "@/components/events/EventCountdown.vue";
 import ClaimDialog from "@/components/wishlist/ClaimDialog.vue";
 import PublicGiftCard from "@/components/wishlist/PublicGiftCard.vue";
 import { eventTypeLabel } from "@/lib/eventOptions";
@@ -52,6 +53,13 @@ const dateLabel = computed(() => {
 
 const giftCount = computed(() => wishlist.value?.items.length ?? 0);
 
+// The server decides whether the gifting window is open; the countdown can also
+// close it locally the moment it hits zero, without waiting for the next poll.
+const giftingClosedLocally = ref(false);
+const giftingOpen = computed(
+  () => (wishlist.value?.giftingOpen ?? true) && !giftingClosedLocally.value,
+);
+
 const locationCoordinates = computed(() => {
   const current = wishlist.value;
   if (
@@ -72,6 +80,9 @@ async function load() {
 
   try {
     wishlist.value = await getPublicWishlist(shareToken.value);
+    // The server is authoritative for closing the window; a local countdown
+    // that already hit zero stays closed until the page is reloaded.
+    if (!wishlist.value.giftingOpen) giftingClosedLocally.value = true;
   } catch (error) {
     if (isApiError(error) && error.status === 404) {
       notFound.value = true;
@@ -92,8 +103,17 @@ const selectedGift = ref<PublicGift | null>(null);
 const busyItemId = ref<string | null>(null);
 
 function askClaim(gift: PublicGift) {
+  if (!giftingOpen.value) return;
   selectedGift.value = gift;
   claimOpen.value = true;
+}
+
+/** The countdown reached zero: stop offering claims right away. */
+function onGiftingFinished() {
+  if (giftingClosedLocally.value) return;
+  giftingClosedLocally.value = true;
+  if (claimOpen.value) claimOpen.value = false;
+  void load();
 }
 
 /** True when this device holds the active claim for a gift. */
@@ -197,6 +217,7 @@ onBeforeUnmount(() => {
 });
 
 watch(shareToken, () => {
+  giftingClosedLocally.value = false;
   void load();
   startPolling();
 });
@@ -267,6 +288,17 @@ watch(shareToken, () => {
             </span>
           </p>
 
+          <div
+            v-if="wishlist.event.startsAt"
+            class="mx-auto mt-7 max-w-md text-left"
+          >
+            <EventCountdown
+              :starts-at="wishlist.event.startsAt"
+              :server-now="wishlist.serverNow"
+              @finished="onGiftingFinished"
+            />
+          </div>
+
           <div class="mx-auto my-8 max-w-xs">
             <BowDivider />
           </div>
@@ -301,8 +333,15 @@ watch(shareToken, () => {
                 With love
               </p>
               <h2 class="mt-2 font-display text-3xl text-ink sm:text-4xl">
-                Choose a gift
+                {{ giftingOpen ? "Choose a gift" : "The gifts" }}
               </h2>
+              <p
+                v-if="!giftingOpen"
+                class="mt-3 max-w-xl text-sm leading-relaxed text-ink/60"
+              >
+                The celebration has started, so gifts can no longer be
+                reserved. You can still browse the list.
+              </p>
             </div>
           </div>
 
@@ -324,6 +363,7 @@ watch(shareToken, () => {
                 :claimed-by-you="claimedByYou(gift)"
                 :manage-url="manageUrlFor(gift)"
                 :busy="busyItemId === gift.id"
+                :gifting-open="giftingOpen"
                 @claim="askClaim(gift)"
               />
             </li>

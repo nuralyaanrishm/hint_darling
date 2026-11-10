@@ -124,6 +124,19 @@ const nullableDate = z.preprocess((value) => {
   return Number.isNaN(date.getTime()) ? value : date;
 }, z.date({ error: "Enter a valid date" }).nullable().optional());
 
+/**
+ * Accepts a full ISO timestamp (the client sends the event start as an absolute
+ * instant), or `""`/null to clear it. A bare calendar date is accepted too and
+ * lands on UTC midnight.
+ */
+const nullableInstant = z.preprocess((value) => {
+  if (value === null) return null;
+  if (typeof value !== "string") return value;
+  if (value.trim() === "") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date;
+}, z.date({ error: "Enter a valid start time" }).nullable().optional());
+
 const optionalPrice = z.preprocess((value) => {
   if (value === undefined || value === null || value === "") return undefined;
   return typeof value === "string" ? Number(value) : value;
@@ -216,6 +229,7 @@ export const createEventSchema = z
       .max(120, "Name must be 120 characters or fewer"),
     type: eventTypeSchema,
     eventDate: nullableDate,
+    startsAt: nullableInstant,
     description: nullableText(2000, "Description"),
     location: nullableText(200, "Location"),
     latitude: nullableLatitude,
@@ -233,6 +247,7 @@ export const updateEventSchema = z
       .optional(),
     type: eventTypeSchema.optional(),
     eventDate: nullableDate,
+    startsAt: nullableInstant,
     description: nullableText(2000, "Description"),
     location: nullableText(200, "Location"),
     latitude: nullableLatitude,

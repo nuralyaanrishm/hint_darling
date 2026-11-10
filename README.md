@@ -206,6 +206,17 @@ Client.
    unverified password account already uses the same address, it is linked to
    Google and its unverified password is cleared.
 
+5. (Optional) Enable the read-only **admin dashboard** by listing the account
+   emails that may use it:
+
+   ```
+   ADMIN_EMAILS="you@example.com,teammate@example.com"
+   ```
+
+   This is a plain environment variable — there is no database role or
+   migration. An empty or unset value disables admin access entirely. Restart
+   the server (or redeploy) after changing it.
+
 > `server/.env` is git-ignored. Never commit real credentials.
 
 ## Setting up PostgreSQL locally
@@ -304,6 +315,28 @@ and a successful claim returns a private **management link** the gift-giver can
 use to view or release their claim later. If someone else claims first, a
 request is rejected with `409` and the message
 `Oops, someone's got this for them! 🎁` plus a suggestion to choose another gift.
+
+### Gifting window
+
+Owners can give an event an optional **start time** alongside its date. The
+client turns “date + time” into an absolute ISO instant (`startsAt`) in the
+owner's timezone, stored as `events.eventStartsAt`, so the countdown and the
+cutoff always agree no matter where a guest is.
+
+- The public wishlist shows a live countdown to that instant. The payload also
+  carries `giftingOpen` and the server's own `serverNow`, so a device with a
+  wrong clock can never re-enable claiming.
+- Once the instant passes, `claimGift` refuses new reservations with `409` and
+  `code: "EVENT_STARTED"` (“Gifting has closed — … has already started.”). The
+  gift cards lose their claim buttons and the page switches to a read-only
+  “The gifts” view.
+- An **idempotent retry of a claim made in time still resolves** after the
+  cutoff, so a lost response never costs a gift-giver their management link.
+- **Cancelling stays possible** after the start, through both the private
+  management link and `POST /api/claims/:claimId/cancel`. Freeing a slot is
+  harmless because nobody can newly claim it.
+- Events without a start time never close. On `PATCH`, omitting `startsAt`
+  leaves the deadline unchanged; sending `null` clears it.
 
 ### Concurrency
 
@@ -457,7 +490,8 @@ URL never reveals another user's data. Event types are validated against the
 enum (`WEDDING`, `BIRTHDAY`, `ENGAGEMENT`, `GRADUATION`, `BABY_SHOWER`,
 `HOUSEWARMING`, `FESTIVE`, `ANNIVERSARY`, `CHRISTMAS`, `OTHER`), and product and
 image links must be `http`/`https` URLs — unsafe schemes such as `javascript:`
-and `data:` are rejected.
+and `data:` are rejected. Events also accept an optional `startsAt` ISO
+timestamp; see [Gifting window](#gifting-window).
 
 | Method   | Path                                          | Description                              |
 | -------- | --------------------------------------------- | ---------------------------------------- |
@@ -479,7 +513,9 @@ and `data:` are rejected.
 
 Guests open `/w/:shareToken` — no account, no session. The page shows the event
 name and date, the wishlist title and description, and a card per gift (image,
-name, preferences, price, product link) with its current availability. Available
+name, preferences, price, product link) with its current availability. When the
+event has a start time, a countdown runs in the hero and the list becomes
+read-only once it passes. Available
 gifts carry an **I'll get this!** button that opens a confirmation dialog, lets
 the guest add a private gift-giver name, reserves the gift, and hands back a
 private management link. Owners and guests can both copy the link, use the
@@ -510,7 +546,7 @@ price. Plans never downgrade.
 
 | Feature | Darling Free | Darling Plus (RM9.90) | Darling Pro (RM19.90) |
 | --- | --- | --- | --- |
-| Active wishlists | 1 | 3 | Unlimited |
+| Active events | 1 | 3 | Unlimited |
 | Gift items per wishlist | 5 | Unlimited | Unlimited |
 | Shareable link | ✓ | ✓ | ✓ |
 | Event details | ✓ | ✓ | ✓ |
@@ -555,6 +591,20 @@ localhost, so use a tunnel (for example `ngrok http 3002`) during development.
 - When the built client is served by the API, `/w/:shareToken` also gets
   per-wishlist Open Graph/Twitter tags so link previews unfurl with the event
   name, wishlist description and a gift image.
+
+### Admin dashboard
+
+Accounts listed in the comma-separated `ADMIN_EMAILS` environment variable can
+open `/admin` and read `GET /api/admin/overview`: account, event, wishlist, gift
+and active-reservation counts, paid Pro unlocks with lifetime revenue, and the
+latest signups, purchases and reservations. It is **read-only**.
+
+Access is decided per request from the env var (case-insensitive; empty or unset
+means nobody is an admin), so there is no role column to migrate. The API
+enforces the same rule as the router: signed-out callers get `401` and
+signed-in non-admins get `403`. The payload is selected explicitly and never
+includes password hashes, Google ids, session/claim tokens or claimant identity
+— admins see the same anonymised reservations that owners do.
 
 ## Testing
 

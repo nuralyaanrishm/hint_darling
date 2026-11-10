@@ -346,6 +346,8 @@ export interface EventSummary {
   name: string;
   type: EventType;
   eventDate: string | null;
+  /** When the celebration starts; gifting closes at this instant. */
+  startsAt: string | null;
   description: string | null;
   location: string | null;
   latitude: number | null;
@@ -363,6 +365,8 @@ export interface EventInput {
   name: string;
   type: EventType;
   eventDate?: string | null;
+  /** Absolute ISO instant built from the date + optional start time. */
+  startsAt?: string | null;
   description?: string | null;
   location?: string | null;
   latitude?: number | null;
@@ -523,12 +527,18 @@ export interface PublicWishlist {
     name: string;
     type: EventType;
     eventDate: string | null;
+    /** When the celebration starts; claiming closes at this instant. */
+    startsAt: string | null;
     location: string | null;
     latitude: number | null;
     longitude: number | null;
     description: string | null;
   };
   items: PublicGift[];
+  /** Server-computed: false once the event has started. */
+  giftingOpen: boolean;
+  /** Server time when this payload was built, used to correct clock skew. */
+  serverNow: string;
   updatedAt: string;
 }
 
@@ -551,6 +561,9 @@ export async function getPublicWishlist(
 
 /** Machine-readable code returned when another gift-giver already claimed the item. */
 export const ALREADY_CLAIMED_CODE: string = "ALREADY_CLAIMED";
+
+/** Returned when the event has started, so gifts can no longer be claimed. */
+export const EVENT_STARTED_CODE: string = "EVENT_STARTED";
 
 export interface ClaimResult {
   id: string;

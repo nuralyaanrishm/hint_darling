@@ -4,6 +4,7 @@ import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseCard from "@/components/ui/BaseCard.vue";
 import GiftIcon from "@/components/decor/GiftIcon.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
+import EventCountdown from "@/components/events/EventCountdown.vue";
 import { eventTypeLabel } from "@/lib/eventOptions";
 import type { EventSummary } from "@/lib/api";
 
@@ -55,6 +56,12 @@ const claimPercent = computed(() => {
       <div v-if="event.location" class="flex items-center gap-2">
         <dt class="sr-only">Location</dt>
         <dd>{{ event.location }}</dd>
+      </div>
+      <div v-if="event.startsAt" class="flex items-center gap-2 pt-1">
+        <dt class="sr-only">Gifting window</dt>
+        <dd>
+          <EventCountdown :starts-at="event.startsAt" variant="compact" />
+        </dd>
       </div>
     </dl>
 

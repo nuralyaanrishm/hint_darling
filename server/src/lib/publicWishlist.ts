@@ -1,4 +1,5 @@
 import type { EventType } from "@prisma/client";
+import { isGiftingClosed } from "./eventTiming.js";
 import { prisma } from "./prisma.js";
 
 // Public (guest-facing) projection of a wishlist.
@@ -49,12 +50,21 @@ export interface PublicWishlistDto {
     name: string;
     type: EventType;
     eventDate: string | null;
+    /** When the celebration starts; claiming closes at this instant. */
+    startsAt: string | null;
     location: string | null;
     latitude: number | null;
     longitude: number | null;
     description: string | null;
   };
   items: PublicGiftDto[];
+  /**
+   * Server-computed so a guest whose device clock is wrong still sees the
+   * truth: false once the event has started and gifts can no longer be claimed.
+   */
+  giftingOpen: boolean;
+  /** Server time at serialisation, used to correct countdown clock skew. */
+  serverNow: string;
   updatedAt: string;
 }
 
@@ -82,6 +92,7 @@ interface PublicWishlistRecord {
     name: string;
     type: EventType;
     eventDate: Date | null;
+    eventStartsAt: Date | null;
     location: string | null;
     latitude: number | null;
     longitude: number | null;
@@ -120,6 +131,7 @@ function toPublicGiftDto(item: PublicWishlistItemRecord): PublicGiftDto {
 
 export function toPublicWishlistDto(
   wishlist: PublicWishlistRecord,
+  now: Date = new Date(),
 ): PublicWishlistDto {
   return {
     title: wishlist.title,
@@ -128,12 +140,15 @@ export function toPublicWishlistDto(
       name: wishlist.event.name,
       type: wishlist.event.type,
       eventDate: wishlist.event.eventDate?.toISOString() ?? null,
+      startsAt: wishlist.event.eventStartsAt?.toISOString() ?? null,
       location: wishlist.event.location,
       latitude: wishlist.event.latitude,
       longitude: wishlist.event.longitude,
       description: wishlist.event.description,
     },
     items: wishlist.items.map(toPublicGiftDto),
+    giftingOpen: !isGiftingClosed(wishlist.event.eventStartsAt, now),
+    serverNow: now.toISOString(),
     updatedAt: wishlist.updatedAt.toISOString(),
   };
 }
@@ -167,6 +182,7 @@ export async function loadPublicWishlist(
           name: true,
           type: true,
           eventDate: true,
+          eventStartsAt: true,
           location: true,
           latitude: true,
           longitude: true,

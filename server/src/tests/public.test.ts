@@ -387,3 +387,60 @@ describe("public wishlist is read-only", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Gifting window
+// ---------------------------------------------------------------------------
+
+describe("public gifting window", () => {
+  it("exposes the start instant and an open window for events without one", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const { guest, shareToken } = await makeFixture("window-open");
+
+    const response = await guest.request(
+      "GET",
+      `/api/public/wishlists/${shareToken}`,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.wishlist.event.startsAt, null);
+    assert.equal(response.body.wishlist.giftingOpen, true);
+    assert.ok(
+      Number.isFinite(Date.parse(response.body.wishlist.serverNow)),
+      "serverNow lets the countdown correct a skewed device clock",
+    );
+  });
+
+  it("closes the window once the start instant passes", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const { owner, guest, eventId, shareToken } = await makeFixture("window");
+
+    const future = new Date(Date.now() + 60 * 60_000).toISOString();
+    const open = await owner.request("PATCH", `/api/events/${eventId}`, {
+      json: { startsAt: future },
+    });
+    assert.equal(open.status, 200);
+    assert.equal(open.body.event.startsAt, future);
+
+    const before = await guest.request(
+      "GET",
+      `/api/public/wishlists/${shareToken}`,
+    );
+    assert.equal(before.body.wishlist.event.startsAt, future);
+    assert.equal(before.body.wishlist.giftingOpen, true);
+
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const closed = await owner.request("PATCH", `/api/events/${eventId}`, {
+      json: { startsAt: past },
+    });
+    assert.equal(closed.status, 200);
+
+    const after = await guest.request(
+      "GET",
+      `/api/public/wishlists/${shareToken}`,
+    );
+    assert.equal(after.body.wishlist.giftingOpen, false);
+  });
+});

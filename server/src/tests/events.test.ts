@@ -302,3 +302,76 @@ describe("event management", () => {
     assert.equal(create.status, 401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Gifting window
+// ---------------------------------------------------------------------------
+
+describe("event start time", () => {
+  it("stores an absolute start instant alongside the calendar date", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const owner = await registerUser("starts-at");
+    const startsAt = "2026-09-12T10:00:00.000Z";
+
+    const created = await owner.request("POST", "/api/events", {
+      json: {
+        name: "Evening reception",
+        type: "WEDDING",
+        eventDate: "2026-09-12",
+        startsAt,
+      },
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.event.startsAt, startsAt);
+    assert.ok(created.body.event.eventDate.startsWith("2026-09-12"));
+
+    const id = created.body.event.id as string;
+    const detail = await owner.request("GET", `/api/events/${id}`);
+    assert.equal(detail.body.event.startsAt, startsAt);
+  });
+
+  it("rejects an unparsable start instant", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const owner = await registerUser("starts-at-invalid");
+    const response = await owner.request("POST", "/api/events", {
+      json: { name: "Bad time", type: "OTHER", startsAt: "not-a-date" },
+    });
+
+    assert.equal(response.status, 400);
+    const fields = response.body.error.fields.map(
+      (field: { field: string }) => field.field,
+    );
+    assert.ok(fields.includes("startsAt"));
+  });
+
+  it("leaves the start instant alone when an update omits it, and clears it on null", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const owner = await registerUser("starts-at-update");
+    const startsAt = "2026-09-12T10:00:00.000Z";
+    const created = await owner.request("POST", "/api/events", {
+      json: { name: "Reception", type: "WEDDING", startsAt },
+    });
+    assert.equal(created.status, 201);
+    const id = created.body.event.id as string;
+
+    const renamed = await owner.request("PATCH", `/api/events/${id}`, {
+      json: { name: "Renamed reception" },
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(
+      renamed.body.event.startsAt,
+      startsAt,
+      "omitting startsAt must not clear the deadline",
+    );
+
+    const cleared = await owner.request("PATCH", `/api/events/${id}`, {
+      json: { startsAt: null },
+    });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.body.event.startsAt, null);
+  });
+});

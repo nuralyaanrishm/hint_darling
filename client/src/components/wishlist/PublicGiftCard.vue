@@ -11,11 +11,14 @@ const props = withDefaults(
     manageUrl?: string | null;
     /** True while a claim request is in flight for this gift. */
     busy?: boolean;
+    /** False once the event has started and gifts can no longer be reserved. */
+    giftingOpen?: boolean;
   }>(),
   {
     claimedByYou: false,
     manageUrl: null,
     busy: false,
+    giftingOpen: true,
   },
 );
 
@@ -191,6 +194,13 @@ const showCount = computed(
           >
             Manage your claim
           </a>
+        </template>
+        <template v-else-if="!giftingOpen">
+          <p
+            class="rounded-full bg-ink/5 px-5 py-2.5 text-center text-sm text-ink/55"
+          >
+            Gifting has closed
+          </p>
         </template>
         <template v-else-if="!fullyClaimed">
           <button

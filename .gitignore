@@ -46,5 +46,5 @@ __screenshots__/
 # Vite
 *.timestamp-*-*.mjs
 
-# Local agent instructions (repo-specific, not shared)
+# Local docs (not shared)
 AGENTS.md

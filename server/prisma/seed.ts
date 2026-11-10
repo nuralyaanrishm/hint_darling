@@ -34,7 +34,11 @@ async function main(): Promise<void> {
 
   const event = await prisma.event.upsert({
     where: { id: "seed-demo-event" },
-    update: {},
+    update: {
+    // The demo wishlist intentionally has no start time, so claiming stays open
+    // for manual testing.
+    eventStartsAt: null,
+  },
     create: {
       id: "seed-demo-event",
       ownerId: owner.id,

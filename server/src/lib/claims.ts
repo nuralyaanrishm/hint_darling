@@ -1,5 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { HttpError } from "./errors.js";
+import {
+  GIFTS_CLOSED_CODE,
+  giftsClosedMessage,
+  isGiftingClosed,
+} from "./eventTiming.js";
 import { prisma } from "./prisma.js";
 import { generateToken, hashToken } from "./tokens.js";
 
@@ -68,12 +73,16 @@ export async function claimGift(input: {
   return prisma.$transaction(async (tx) => {
     // Lock the item's row inside the transaction. Two simultaneous claims for
     // the same gift queue here; the second re-reads after the first commits and
-    // therefore sees its claim. Only active, non-private lists are claimable.
-    const matches = await tx.$queryRaw<{ id: string }[]>(
+    // therefore sees its claim. Only active, non-private lists are claimable,
+    // and only until the event starts.
+    const matches = await tx.$queryRaw<
+      { id: string; eventStartsAt: Date | null; eventName: string }[]
+    >(
       Prisma.sql`
-        SELECT wi."id"
+        SELECT wi."id", e."eventStartsAt", e."name" AS "eventName"
         FROM "wishlist_items" AS wi
         JOIN "wishlists" AS w ON w."id" = wi."wishlistId"
+        JOIN "events" AS e ON e."id" = w."eventId"
         WHERE wi."id" = ${input.itemId}
           AND w."shareToken" = ${input.shareToken}
           AND w."isActive" = true
@@ -86,10 +95,21 @@ export async function claimGift(input: {
       throw new HttpError(404, "Not found");
     }
 
+    const match = matches[0]!;
+    const giftingClosed = isGiftingClosed(match.eventStartsAt);
+    const closedError = () =>
+      new HttpError(
+        409,
+        giftsClosedMessage(match.eventName),
+        undefined,
+        GIFTS_CLOSED_CODE,
+      );
+
     // An idempotent retry returns the original claim (with a fresh management
     // token, since the first token was only ever sent to this caller once). A
     // cancelled claim being requested again with the same key means the guest
-    // is re-claiming, which simply reactivates the same row.
+    // is re-claiming, which counts as a new claim and is refused once the
+    // event has started — but a retry of a claim made in time still resolves.
     if (input.idempotencyKey) {
       const existing = await tx.giftClaim.findUnique({
         where: { idempotencyKey: input.idempotencyKey },
@@ -108,6 +128,10 @@ export async function claimGift(input: {
             claim: toClaimResponse(refreshed, manageToken),
             created: false,
           };
+        }
+
+        if (giftingClosed) {
+          throw closedError();
         }
 
         await tx.giftClaim.update({
@@ -138,6 +162,12 @@ export async function claimGift(input: {
           ALREADY_CLAIMED_CODE,
         );
       }
+    }
+
+    // The gifting window closes the moment the event starts. Cancelling an
+    // existing claim stays possible; only new reservations are refused.
+    if (giftingClosed) {
+      throw closedError();
     }
 
     const active = await tx.giftClaim.findFirst({

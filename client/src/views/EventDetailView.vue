@@ -6,6 +6,7 @@ import BaseCard from "@/components/ui/BaseCard.vue";
 import PlanCheckoutDialog from "@/components/billing/PlanCheckoutDialog.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
 import GiftIcon from "@/components/decor/GiftIcon.vue";
+import EventCountdown from "@/components/events/EventCountdown.vue";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import EmptyState from "@/components/ui/EmptyState.vue";
 import LoadingState from "@/components/ui/LoadingState.vue";
@@ -433,6 +434,9 @@ watch(
             <span v-if="dateLabel && event.location"> · </span>
             <span v-if="event.location">{{ event.location }}</span>
           </p>
+          <div v-if="event.startsAt" class="mt-3">
+            <EventCountdown :starts-at="event.startsAt" variant="compact" />
+          </div>
           <p
             v-if="event.description"
             class="mt-4 max-w-2xl text-sm leading-relaxed text-ink/70"
