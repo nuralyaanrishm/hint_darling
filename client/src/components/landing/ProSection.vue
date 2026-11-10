@@ -142,7 +142,7 @@ function rowBackground(index: number): string {
               v-if="plan.tier === 'PRO'"
               class="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-plan-popular px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-white shadow-sm"
             >
-              Most popular
+              Most Recommended
             </span>
             <p class="text-lg font-semibold text-ink">{{ plan.label }}</p>
             <p class="mt-2 font-display text-4xl text-ink">
@@ -268,14 +268,14 @@ function rowBackground(index: number): string {
               v-if="plan.tier === 'PRO'"
               class="absolute top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-plan-popular px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white"
             >
-              Most popular
+              Most Recommended
             </span>
             <p class="text-lg font-semibold text-ink">{{ plan.label }}</p>
             <p class="mt-1 font-display text-4xl text-ink">
               {{ formatPlanPrice(plan.priceSen) }}
             </p>
             <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-ink/55">
-              One-time
+              /month
             </p>
           </div>
 
