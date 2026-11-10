@@ -72,14 +72,14 @@ const upgrades = computed(() =>
 
 const planDescription = computed(() => {
   if (plan.value === "FREE") {
-    return `Your Free plan includes ${planDefinition.value.activeWishlistLimit} active wishlist and ${planDefinition.value.itemLimit} gifts per wishlist. Claim tracking is locked.`;
+    return `Your Free plan includes ${planDefinition.value.activeWishlistLimit} active event and ${planDefinition.value.itemLimit} gifts per wishlist. Claim tracking is locked.`;
   }
 
   if (plan.value === "PLUS") {
-    return "Up to 3 active wishlists and unlimited gifts on every wishlist, with gift reservation tracking and priority support.";
+    return "Up to 3 active events and unlimited gifts on every wishlist, with gift reservation tracking and priority support.";
   }
 
-  return "Unlimited active wishlists and gifts on every wishlist, with gift reservation tracking and priority support, plus guest media notes on the way.";
+  return "Unlimited active events and gifts on every wishlist, with gift reservation tracking and priority support, plus guest media notes on the way.";
 });
 
 function openUpgrade(plan: Exclude<PlanTier, "FREE">) {

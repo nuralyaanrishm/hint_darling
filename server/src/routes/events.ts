@@ -126,7 +126,7 @@ eventsRouter.delete("/:eventId", async (req, res) => {
 
 // POST /api/events/:eventId/wishlist — create the event's wishlist.
 //
-// Each plan includes a set number of active wishlists (Free 1, Plus 3, Pro
+// Each plan includes a set number of active events (Free 1, Plus 3, Pro
 // unlimited). The user row is locked while we count and create so two
 // simultaneous requests cannot both slip through on the last slot.
 eventsRouter.post("/:eventId/wishlist", async (req, res) => {
@@ -158,7 +158,7 @@ eventsRouter.post("/:eventId/wishlist", async (req, res) => {
         const nextPlan = owner.plan === "FREE" ? "PLUS" : "PRO";
         const next = PLAN_CONFIG[nextPlan];
         const price = (next.priceSen / 100).toFixed(2);
-        const noun = limit === 1 ? "wishlist" : "wishlists";
+        const noun = limit === 1 ? "event" : "events";
 
         throw new HttpError(
           402,

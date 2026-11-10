@@ -31,7 +31,7 @@ type PricingRow =
 const plans = PLAN_ORDER.map((tier) => PLAN_CATALOG[tier]);
 
 const rows: PricingRow[] = [
-  { kind: "limit", key: "activeWishlistLimit", label: "Active wishlist" },
+  { kind: "limit", key: "activeWishlistLimit", label: "Active Event" },
   { kind: "limit", key: "itemLimit", label: "Gift items" },
   ...PLAN_FEATURE_ORDER.map((key) => ({
     kind: "feature" as const,
