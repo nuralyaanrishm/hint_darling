@@ -719,22 +719,46 @@ export async function cancelMyClaim(claimId: string): Promise<CancelResult> {
   return data.claim;
 }
 
+/** One day of activity in the admin dashboard's 30-day series. */
+export interface AdminSeriesPoint {
+  /** UTC day, `YYYY-MM-DD`. */
+  date: string;
+  signups: number;
+  claims: number;
+  revenueSen: number;
+}
+
 /** Read-only admin dashboard payload. Claims are anonymised by the server. */
 export interface AdminOverview {
   counts: {
     users: number;
     verifiedUsers: number;
+    /** Accounts on a paid plan (Pro). Event Pass buyers stay on FREE. */
     paidUsers: number;
+    /** Distinct accounts with at least one paid purchase of any product. */
+    payingUsers: number;
+    usersWithEvents: number;
+    usersWithItems: number;
     events: number;
     wishlists: number;
     items: number;
     activeClaims: number;
+    cancelledClaims: number;
   };
   revenue: {
-    paidPurchases: number;
-    grossSen: number;
     currency: string;
+    total: { purchases: number; grossSen: number };
+    pro: { purchases: number; grossSen: number };
+    eventPass: { purchases: number; grossSen: number };
   };
+  /** Checkout funnel across every product, including abandoned bills. */
+  checkout: {
+    pending: number;
+    paid: number;
+    failed: number;
+  };
+  /** Last 30 days, one point per UTC day, oldest first. */
+  series: AdminSeriesPoint[];
   recentSignups: {
     id: string;
     name: string;
@@ -745,6 +769,7 @@ export interface AdminOverview {
   }[];
   recentPurchases: {
     email: string;
+    product: BillingProduct;
     amountSen: number;
     currency: string;
     paidAt: string | null;

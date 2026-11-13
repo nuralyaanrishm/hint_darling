@@ -133,16 +133,35 @@ describe("admin overview payload", () => {
       "users",
       "verifiedUsers",
       "paidUsers",
+      "payingUsers",
+      "usersWithEvents",
+      "usersWithItems",
       "events",
       "wishlists",
       "items",
       "activeClaims",
+      "cancelledClaims",
     ]) {
       assert.equal(typeof body.counts[key], "number", `counts.${key}`);
     }
     assert.ok(body.counts.users >= 1);
-    assert.equal(typeof body.revenue.paidPurchases, "number");
-    assert.equal(typeof body.revenue.grossSen, "number");
+    assert.equal(typeof body.revenue.total.grossSen, "number");
+    assert.equal(typeof body.revenue.pro.grossSen, "number");
+    assert.equal(typeof body.revenue.eventPass.grossSen, "number");
+    assert.equal(typeof body.revenue.currency, "string");
+    assert.equal(typeof body.checkout.pending, "number");
+    assert.equal(typeof body.checkout.paid, "number");
+    assert.equal(typeof body.checkout.failed, "number");
+
+    // The 30-day series is dense: one point per UTC day, oldest first.
+    assert.ok(Array.isArray(body.series));
+    assert.equal(body.series.length, 30);
+    for (const point of body.series) {
+      assert.match(point.date, /^\d{4}-\d{2}-\d{2}$/);
+      assert.equal(typeof point.signups, "number");
+      assert.equal(typeof point.claims, "number");
+      assert.equal(typeof point.revenueSen, "number");
+    }
 
     // Recent activity respects the same privacy rules as the owner views.
     assert.ok(Array.isArray(body.recentSignups));
@@ -174,6 +193,54 @@ describe("admin overview payload", () => {
         `overview must not expose ${forbidden}`,
       );
     }
+  });
+
+  it("counts Event Pass buyers as paying even while their plan stays free", async (t) => {
+    if (skipWithoutDb(t)) return;
+
+    const client = await adminSession();
+
+    const buyerEmail = uniqueEmail("pass-buyer", runId);
+    const buyer = new TestClient(baseUrl);
+    await buyer.ensureCsrf();
+    await createUser(buyer, buyerEmail);
+
+    const account = await prisma.user.findUniqueOrThrow({
+      where: { email: buyerEmail },
+    });
+
+    await prisma.purchase.create({
+      data: {
+        userId: account.id,
+        status: "PAID",
+        product: "EVENT_PASS",
+        amountSen: 990,
+        currency: "MYR",
+        externalReference: `hd-test-pass-${runId}`,
+        paidAt: new Date(),
+      },
+    });
+
+    const response = await client.request("GET", "/api/admin/overview");
+    assert.equal(response.status, 200);
+
+    const body = response.body;
+
+    // The purchase unlocks one event, not the account's plan.
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { email: buyerEmail },
+    });
+    assert.equal(after.plan, "FREE");
+
+    assert.ok(body.revenue.eventPass.purchases >= 1);
+    assert.ok(body.revenue.eventPass.grossSen >= 990);
+    assert.ok(body.revenue.total.grossSen >= body.revenue.eventPass.grossSen);
+    assert.ok(body.counts.payingUsers >= 1);
+
+    // Today's bucket picked up both the signup and the payment.
+    const today = body.series[body.series.length - 1];
+    assert.ok(today.signups >= 1);
+    assert.ok(today.revenueSen >= 990);
   });
 
   it("matches allowlisted emails case-insensitively", async (t) => {
