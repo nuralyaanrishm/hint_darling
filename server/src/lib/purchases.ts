@@ -2,11 +2,13 @@ import { Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { HttpError } from "./errors.js";
 import {
+  EVENT_PASS,
   PLAN_CONFIG,
   PLAN_ORDER,
+  PRO_IS_LAUNCH_PRICE,
   UNLOCK_CURRENCY,
-  isPlanTier,
-  planRank,
+  isBillingProduct,
+  type BillingProduct,
   type PlanDefinition,
   type PlanFeatureKey,
   type PlanFeatures,
@@ -22,50 +24,100 @@ import {
   verifyCallbackHash,
 } from "./toyyibpay.js";
 
-// One-time plan purchases.
+// One-time purchases.
 //
-// A purchase row is the audit trail and the idempotency key for ToyyibPay.
-// `externalReference` is our opaque order id; ToyyibPay echoes it back as
-// `order_id` in the callback, which is how we match the payment to the account.
-// Once a purchase is PAID we raise User.plan to the purchased tier. Plans never
-// downgrade, and each tier is a single lifetime payment.
+// A purchase row is the audit trail, the entitlement (for Event Passes) and the
+// idempotency key for ToyyibPay. `externalReference` is our opaque order id;
+// ToyyibPay echoes it back as `order_id` in the callback, which is how we match
+// the payment to the account. A paid PRO row raises User.plan exactly once; a
+// paid EVENT_PASS row unlocks its event and needs no further bookkeeping.
+
+export interface RecentPurchase {
+  product: BillingProduct;
+  amountSen: number;
+  paidAt: string | null;
+  eventId: string | null;
+  eventName: string | null;
+}
 
 export interface BillingSummary {
   plan: PlanTierName;
   planLabel: string;
   planUnlockedAt: string | null;
-  activeWishlistLimit: number | null;
+  activeEventLimit: number | null;
   itemLimit: number | null;
   features: PlanFeatures;
   comingSoon: PlanFeatureKey[];
   isPaid: boolean;
-  prices: Record<PlanTierName, number>;
+  prices: { FREE: number; PRO: number; EVENT_PASS: number };
   plans: PlanDefinition[];
+  eventPass: {
+    label: string;
+    shortLabel: string;
+    priceSen: number;
+    priceNote: "per event";
+  };
+  proLaunchPrice: boolean;
+  recentPurchase: RecentPurchase | null;
   currency: string;
 }
 
-export function toBillingSummary(user: {
-  plan: PlanTierName;
-  planUnlockedAt: Date | null;
-}): BillingSummary {
+export function toBillingSummary(
+  user: { plan: PlanTierName; planUnlockedAt: Date | null },
+  recentPurchase: RecentPurchase | null = null,
+): BillingSummary {
   const current = PLAN_CONFIG[user.plan];
 
   return {
     plan: user.plan,
     planLabel: current.label,
     planUnlockedAt: user.planUnlockedAt?.toISOString() ?? null,
-    activeWishlistLimit: current.activeWishlistLimit,
+    activeEventLimit: current.activeEventLimit,
     itemLimit: current.itemLimit,
     features: current.features,
     comingSoon: current.comingSoon,
     isPaid: user.plan !== "FREE",
     prices: {
       FREE: PLAN_CONFIG.FREE.priceSen,
-      PLUS: PLAN_CONFIG.PLUS.priceSen,
       PRO: PLAN_CONFIG.PRO.priceSen,
+      EVENT_PASS: EVENT_PASS.priceSen,
     },
     plans: PLAN_ORDER.map((tier) => PLAN_CONFIG[tier]),
+    eventPass: {
+      label: EVENT_PASS.label,
+      shortLabel: EVENT_PASS.shortLabel,
+      priceSen: EVENT_PASS.priceSen,
+      priceNote: EVENT_PASS.priceNote,
+    },
+    proLaunchPrice: PRO_IS_LAUNCH_PRICE,
+    recentPurchase,
     currency: UNLOCK_CURRENCY,
+  };
+}
+
+async function loadRecentPurchase(
+  userId: string,
+): Promise<RecentPurchase | null> {
+  const purchase = await prisma.purchase.findFirst({
+    where: { userId, status: "PAID" },
+    orderBy: { paidAt: "desc" },
+    select: {
+      product: true,
+      amountSen: true,
+      paidAt: true,
+      eventId: true,
+      event: { select: { name: true } },
+    },
+  });
+
+  if (!purchase) return null;
+
+  return {
+    product: purchase.product,
+    amountSen: purchase.amountSen,
+    paidAt: purchase.paidAt?.toISOString() ?? null,
+    eventId: purchase.eventId,
+    eventName: purchase.event?.name ?? null,
   };
 }
 
@@ -81,29 +133,41 @@ export async function getBillingSummary(
     throw new HttpError(404, "Not found");
   }
 
-  return toBillingSummary(user);
+  return toBillingSummary(user, await loadRecentPurchase(userId));
 }
 
 interface PendingCheckout {
   existingBillCode: string | null;
   purchase: { id: string; externalReference: string } | null;
   user: { name: string; email: string };
-  plan: PlanTierName;
+  product: BillingProduct;
+  eventName: string | null;
+  amountSen: number;
 }
 
 /**
- * Starts a one-time checkout for a paid tier.
+ * Starts a one-time checkout for a Pro plan or an Event Pass.
  *
  * The user row is locked while we look for a recent pending bill, so a
  * double-click cannot create two payable bills. The actual ToyyibPay call runs
  * outside the transaction (network calls must not hold database locks).
  */
-export async function createPlanCheckout(
+export async function createCheckout(
   userId: string,
-  targetPlan: PlanTierName,
+  product: BillingProduct,
+  eventId?: string | null,
 ): Promise<{ paymentUrl: string }> {
-  if (!isPlanTier(targetPlan) || targetPlan === "FREE") {
-    throw new HttpError(400, "Choose Plus or Pro to continue.");
+  if (!isBillingProduct(product)) {
+    throw new HttpError(400, "Choose an Event Pass or Pro to continue.");
+  }
+
+  if (product === "EVENT_PASS" && !eventId) {
+    throw new HttpError(
+      400,
+      "Choose an event to unlock.",
+      undefined,
+      "EVENT_REQUIRED",
+    );
   }
 
   // If a previous bill was paid but its callback never arrived, settle it now
@@ -115,32 +179,77 @@ export async function createPlanCheckout(
 
     const user = await tx.user.findUnique({
       where: { id: userId },
-      select: {
-        name: true,
-        email: true,
-        plan: true,
-        planUnlockedAt: true,
-      },
+      select: { name: true, email: true, plan: true },
     });
 
     if (!user) {
       throw new HttpError(404, "Not found");
     }
 
-    if (planRank(targetPlan) <= planRank(user.plan)) {
-      throw new HttpError(
-        409,
-        "You're already on this plan or a higher one.",
-        undefined,
-        "PLAN_NOT_UPGRADABLE",
-      );
+    let eventName: string | null = null;
+    let amountSen = PLAN_CONFIG.PRO.priceSen;
+
+    if (product === "PRO") {
+      if (user.plan === "PRO") {
+        throw new HttpError(
+          409,
+          "You're already on Darling Pro.",
+          undefined,
+          "PLAN_NOT_UPGRADABLE",
+        );
+      }
+    } else {
+      if (!eventId) {
+        throw new HttpError(400, "Choose an event to unlock.");
+      }
+
+      if (user.plan === "PRO") {
+        throw new HttpError(
+          409,
+          "Darling Pro already unlocks every event.",
+          undefined,
+          "EVENT_PASS_NOT_NEEDED",
+        );
+      }
+
+      const event = await tx.event.findFirst({
+        where: { id: eventId, ownerId: userId },
+        select: { name: true },
+      });
+
+      if (!event) {
+        throw new HttpError(404, "Not found");
+      }
+
+      const alreadyPaid = await tx.purchase.findFirst({
+        where: {
+          userId,
+          eventId,
+          product: "EVENT_PASS",
+          status: "PAID",
+        },
+        select: { id: true },
+      });
+
+      if (alreadyPaid) {
+        throw new HttpError(
+          409,
+          "This event is already unlocked.",
+          undefined,
+          "EVENT_ALREADY_UNLOCKED",
+        );
+      }
+
+      eventName = event.name;
+      amountSen = EVENT_PASS.priceSen;
     }
 
     const recent = new Date(Date.now() - 30 * 60 * 1000);
     const pending = await tx.purchase.findFirst({
       where: {
         userId,
-        plan: targetPlan,
+        product,
+        eventId: product === "EVENT_PASS" ? eventId : null,
         status: "PENDING",
         billCode: { not: null },
         createdAt: { gte: recent },
@@ -154,17 +263,18 @@ export async function createPlanCheckout(
         existingBillCode: pending.billCode,
         purchase: null,
         user,
-        plan: targetPlan,
+        product,
+        eventName,
+        amountSen,
       };
     }
-
-    const definition = PLAN_CONFIG[targetPlan];
 
     const purchase = await tx.purchase.create({
       data: {
         userId,
-        plan: targetPlan,
-        amountSen: definition.priceSen,
+        product,
+        eventId: product === "EVENT_PASS" ? eventId : null,
+        amountSen,
         currency: UNLOCK_CURRENCY,
         externalReference: randomBytes(16).toString("hex"),
       },
@@ -173,9 +283,14 @@ export async function createPlanCheckout(
 
     return {
       existingBillCode: null,
-      purchase: { id: purchase.id, externalReference: purchase.externalReference },
+      purchase: {
+        id: purchase.id,
+        externalReference: purchase.externalReference,
+      },
       user,
-      plan: targetPlan,
+      product,
+      eventName,
+      amountSen,
     };
   });
 
@@ -187,13 +302,17 @@ export async function createPlanCheckout(
     throw new HttpError(500, "We couldn't start the payment. Please try again.");
   }
 
-  const definition = PLAN_CONFIG[checkout.plan];
-
   try {
     const bill = await createToyyibPayBill({
-      name: `Hint Darling ${definition.shortLabel}`,
-      description: `Unlock ${definition.label}`,
-      amountSen: definition.priceSen,
+      name:
+        checkout.product === "PRO"
+          ? "Hint Darling Pro"
+          : "Hint Darling Event Pass",
+      description:
+        checkout.product === "PRO"
+          ? "Unlock Darling Pro"
+          : `Unlock ${checkout.eventName ?? "your event"}`.slice(0, 100),
+      amountSen: checkout.amountSen,
       externalReference: checkout.purchase.externalReference,
       payerName: checkout.user.name,
       payerEmail: checkout.user.email,
@@ -247,7 +366,10 @@ interface ActivationInput {
   raw: Prisma.InputJsonValue;
 }
 
-/** Marks a purchase paid and raises the account's plan exactly once. */
+/**
+ * Marks a purchase paid exactly once. A Pro purchase raises the account's plan;
+ * an Event Pass is already entitled by its own PAID row.
+ */
 async function activatePurchase(
   purchaseId: string,
   input: ActivationInput,
@@ -257,7 +379,7 @@ async function activatePurchase(
 
     const purchase = await tx.purchase.findUnique({
       where: { id: purchaseId },
-      select: { userId: true, status: true, plan: true },
+      select: { userId: true, status: true, product: true, eventId: true },
     });
 
     if (!purchase || purchase.status === "PAID") {
@@ -279,19 +401,23 @@ async function activatePurchase(
       },
     });
 
+    if (purchase.product !== "PRO") {
+      return;
+    }
+
     const user = await tx.user.findUnique({
       where: { id: purchase.userId },
       select: { plan: true },
     });
 
-    // A late callback for an older/lower tier must never downgrade the account.
-    if (!user || planRank(purchase.plan) <= planRank(user.plan)) {
+    // A late callback must never downgrade an account.
+    if (!user || user.plan === "PRO") {
       return;
     }
 
     await tx.user.update({
       where: { id: purchase.userId },
-      data: { plan: purchase.plan, planUnlockedAt: now },
+      data: { plan: "PRO", planUnlockedAt: now },
     });
   });
 }
@@ -356,13 +482,18 @@ export async function applyToyyibPayCallback(
   });
 }
 
+export interface ReconcileResult {
+  reconciled: boolean;
+  activated: { product: BillingProduct; eventName: string | null }[];
+}
+
 /**
  * Fallback for missed callbacks. ToyyibPay fires callbacks once and does not
  * retry, so the return page asks us to reconcile any still-pending bill.
  */
 export async function reconcilePendingPurchases(
   userId: string,
-): Promise<{ reconciled: boolean }> {
+): Promise<ReconcileResult> {
   const pending = await prisma.purchase.findMany({
     where: {
       userId,
@@ -376,10 +507,12 @@ export async function reconcilePendingPurchases(
       externalReference: true,
       amountSen: true,
       refno: true,
+      product: true,
+      event: { select: { name: true } },
     },
   });
 
-  let reconciled = false;
+  const activated: ReconcileResult["activated"] = [];
 
   for (const purchase of pending) {
     if (!purchase.billCode) continue;
@@ -421,8 +554,11 @@ export async function reconcilePendingPurchases(
       raw: successful as unknown as Prisma.InputJsonValue,
     });
 
-    reconciled = true;
+    activated.push({
+      product: purchase.product,
+      eventName: purchase.event?.name ?? null,
+    });
   }
 
-  return { reconciled };
+  return { reconciled: activated.length > 0, activated };
 }

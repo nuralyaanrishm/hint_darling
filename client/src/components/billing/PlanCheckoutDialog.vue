@@ -4,36 +4,48 @@ import BaseButton from "@/components/ui/BaseButton.vue";
 import BaseModal from "@/components/ui/BaseModal.vue";
 import { createPlanCheckout, isApiError } from "@/lib/api";
 import {
-  PLAN_CATALOG,
   PLAN_FEATURE_LABELS,
   PLAN_FEATURE_ORDER,
+  PRICING_COLUMNS,
+  PRO_IS_LAUNCH_PRICE,
   formatPlanPrice,
+  type BillingProduct,
   type PlanFeatureKey,
-  type PlanTier,
 } from "@/lib/plans";
 
 const open = defineModel<boolean>({ required: true });
 
 const props = defineProps<{
-  plan: Exclude<PlanTier, "FREE">;
+  product: BillingProduct;
+  /** Required for an Event Pass; ignored for Pro. */
+  eventId?: string;
+  eventName?: string;
 }>();
 
 const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
 
-const definition = computed(() => PLAN_CATALOG[props.plan]);
+const column = computed(() => PRICING_COLUMNS[props.product]);
+
+const isEventPass = computed(() => props.product === "EVENT_PASS");
+
+const title = computed(() =>
+  isEventPass.value
+    ? `Unlock ${props.eventName ?? "this event"}`
+    : `Upgrade to ${column.value.label}`,
+);
 
 const benefits = computed(() =>
-  PLAN_FEATURE_ORDER.filter((key) => definition.value.features[key]).map(
+  PLAN_FEATURE_ORDER.filter((key) => column.value.features[key]).map(
     (key) => ({
       key,
       label: PLAN_FEATURE_LABELS[key],
-      comingSoon: definition.value.comingSoon.includes(key as PlanFeatureKey),
+      comingSoon: column.value.comingSoon.includes(key as PlanFeatureKey),
     }),
   ),
 );
 
-const priceLabel = computed(() => formatPlanPrice(definition.value.priceSen));
+const priceLabel = computed(() => formatPlanPrice(column.value.priceSen));
 
 watch(open, (isOpen) => {
   if (isOpen) {
@@ -45,11 +57,19 @@ watch(open, (isOpen) => {
 async function pay() {
   if (submitting.value) return;
 
+  if (isEventPass.value && !props.eventId) {
+    errorMessage.value = "Choose an event to unlock first.";
+    return;
+  }
+
   submitting.value = true;
   errorMessage.value = null;
 
   try {
-    const { paymentUrl } = await createPlanCheckout(props.plan);
+    const { paymentUrl } = await createPlanCheckout(
+      props.product,
+      isEventPass.value ? props.eventId : undefined,
+    );
     window.location.assign(paymentUrl);
   } catch (error) {
     if (isApiError(error)) {
@@ -64,14 +84,23 @@ async function pay() {
 </script>
 
 <template>
-  <BaseModal
-    v-model="open"
-    :title="`Upgrade to ${definition.label}`"
-    size="sm"
-  >
+  <BaseModal v-model="open" :title="title" size="sm">
     <p class="text-sm leading-relaxed text-ink/75">
-      One payment of {{ priceLabel }}, yours forever. No subscription and no
-      renewal.
+      <template v-if="isEventPass">
+        One payment of {{ priceLabel }} unlocks this event — no subscription and
+        no renewal.
+      </template>
+      <template v-else>
+        One payment of {{ priceLabel }}, yours forever. No subscription and no
+        renewal.
+      </template>
+    </p>
+
+    <p
+      v-if="!isEventPass && PRO_IS_LAUNCH_PRICE"
+      class="mt-2 inline-flex rounded-full bg-rose/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-rose-deep"
+    >
+      Launch price
     </p>
 
     <ul class="mt-5 space-y-3 text-sm text-ink/75">
@@ -98,6 +127,14 @@ async function pay() {
         </span>
       </li>
     </ul>
+
+    <p
+      v-if="!isEventPass"
+      class="mt-4 text-xs leading-relaxed text-ink/55"
+    >
+      One event pass covers a single celebration and stays with that event
+      forever. Pro covers every event you run.
+    </p>
 
     <p
       v-if="errorMessage"

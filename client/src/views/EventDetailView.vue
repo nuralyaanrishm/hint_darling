@@ -18,6 +18,7 @@ import { eventTypeLabel } from "@/lib/eventOptions";
 import {
   PLAN_CATALOG,
   formatPlanPrice,
+  type BillingProduct,
   type PlanTier,
 } from "@/lib/plans";
 import {
@@ -57,23 +58,35 @@ const wishlist = computed(() => event.value?.wishlist ?? null);
 
 const billing = ref<BillingSummary | null>(null);
 const plan = computed<PlanTier>(() => billing.value?.plan ?? currentPlan.value);
-const planLabel = computed(() => PLAN_CATALOG[plan.value].label);
-const itemLimit = computed<number | null>(
-  () => billing.value?.itemLimit ?? PLAN_CATALOG[plan.value].itemLimit,
+const planLabel = computed(() =>
+  plan.value === "PRO"
+    ? "Darling Pro"
+    : eventUnlocked.value
+      ? "Event Pass"
+      : PLAN_CATALOG[plan.value].label,
+);
+const eventUnlocked = computed(() => wishlist.value?.eventUnlocked ?? false);
+const itemLimit = computed<number | null>(() =>
+  eventUnlocked.value
+    ? null
+    : (billing.value?.itemLimit ?? PLAN_CATALOG[plan.value].itemLimit),
 );
 const atFreeLimit = computed(
   () =>
     itemLimit.value !== null &&
     (wishlist.value?.items.length ?? 0) >= itemLimit.value,
 );
-const upgradePlan = computed<Exclude<PlanTier, "FREE">>(() =>
-  plan.value === "FREE" ? "PLUS" : "PRO",
-);
-const upgradePrice = computed(() =>
-  formatPlanPrice(PLAN_CATALOG[upgradePlan.value].priceSen),
+const eventPassPrice = computed(() =>
+  formatPlanPrice(billing.value?.prices.EVENT_PASS ?? 990),
 );
 
+const unlockProduct = ref<BillingProduct>("EVENT_PASS");
 const unlockOpen = ref(false);
+
+function openEventPass() {
+  unlockProduct.value = "EVENT_PASS";
+  unlockOpen.value = true;
+}
 
 const dateLabel = computed(() => {
   const value = event.value?.eventDate;
@@ -92,9 +105,11 @@ const claimSummary = computed(() => {
   return { total, claimed, available: total - claimed };
 });
 
-// The server withholds claim status for free owners, so the whole claim summary
-// is replaced with an unlock prompt instead of showing misleading zeroes.
-const claimsLocked = computed(() => wishlist.value?.claimsLocked ?? false);
+// Claim status is shown to every owner (guests see it on the share link).
+// Only the guest's display name needs an Event Pass or Pro.
+const claimantNamesLocked = computed(
+  () => wishlist.value?.claimantNamesLocked ?? false,
+);
 
 const claimPercent = computed(() => {
   const { total, claimed } = claimSummary.value;
@@ -230,6 +245,7 @@ async function onSaveWishlist(payload: WishlistInput) {
       }
       if (error.code === "WISHLIST_LIMIT_REACHED") {
         wishlistModalOpen.value = false;
+        unlockProduct.value = "PRO";
         unlockOpen.value = true;
         return;
       }
@@ -262,7 +278,7 @@ function openAddItem() {
 
 function openAddItemOrUnlock() {
   if (atFreeLimit.value) {
-    unlockOpen.value = true;
+    openEventPass();
     return;
   }
   openAddItem();
@@ -299,7 +315,7 @@ async function onSaveItem(payload: WishlistItemInput) {
       }
       if (error.code === "ITEM_LIMIT_REACHED") {
         itemModalOpen.value = false;
-        unlockOpen.value = true;
+        openEventPass();
         return;
       }
       itemFormError.value = error.message;
@@ -544,12 +560,12 @@ watch(
               You've used all {{ itemLimit }} gifts on this wishlist.
             </p>
             <p class="mt-1 text-sm text-ink/65">
-              Upgrade to Darling Plus for unlimited gifts on this wishlist and
-              every future one — one payment, yours forever.
+              Unlock this event for {{ eventPassPrice }} for unlimited gifts and
+              claimant names, or go Pro once and cover every celebration.
             </p>
           </div>
-          <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
-            Upgrade for {{ upgradePrice }}
+          <BaseButton size="sm" class="shrink-0" @click="openEventPass">
+            Unlock for {{ eventPassPrice }}
           </BaseButton>
         </div>
 
@@ -572,9 +588,9 @@ watch(
           <span class="font-medium text-ink">Public</span>.
         </div>
 
-        <!-- Claim status summary (Pro) -->
+        <!-- Claim status summary -->
         <div
-          v-if="wishlist.items.length > 0 && !claimsLocked"
+          v-if="wishlist.items.length > 0"
           class="mt-8 overflow-hidden rounded-3xl border border-blush bg-white/80 shadow-soft"
         >
           <div class="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:px-8">
@@ -605,7 +621,9 @@ watch(
                   {{
                     claimSummary.claimed === 0
                       ? "Your gifts are all still available — share your list to get them noticed."
-                      : `You can see which gifts are reserved and who's giving them.`
+                      : claimantNamesLocked
+                        ? "You can see which gifts are reserved. Unlock this event to see who's giving them."
+                        : `You can see which gifts are reserved and who's giving them.`
                   }}
                 </p>
               </div>
@@ -628,51 +646,16 @@ watch(
                   :style="{ width: `${claimPercent}%` }"
                 />
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Claim insights are a Pro feature -->
-        <div
-          v-else-if="wishlist.items.length > 0"
-          class="mt-8 flex flex-col gap-4 rounded-3xl border border-blush bg-cream px-6 py-5 shadow-soft sm:flex-row sm:items-center sm:justify-between sm:px-8"
-        >
-          <div class="flex items-start gap-3.5">
-            <span
-              class="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose/15 text-rose-deep"
-              aria-hidden="true"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
+              <BaseButton
+                v-if="claimantNamesLocked"
+                size="sm"
+                class="mt-3"
+                @click="openEventPass"
               >
-                <rect x="4" y="10" width="16" height="10" rx="2" />
-                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-              </svg>
-            </span>
-            <div>
-              <p class="text-xs uppercase tracking-[0.25em] text-rose">
-                Gift status
-              </p>
-              <p class="mt-1 font-display text-2xl text-ink">
-                Unlock Plus to see how many gifts are claimed
-              </p>
-              <p class="mt-1 text-sm text-ink/65">
-                Claim tracking is part of Plus and Pro. One payment from
-                RM 9.90 lets you see which gifts have been reserved and who's
-                giving them.
-              </p>
+                See who · {{ eventPassPrice }}
+              </BaseButton>
             </div>
           </div>
-          <BaseButton size="sm" class="shrink-0" @click="unlockOpen = true">
-            View upgrade options
-          </BaseButton>
         </div>
 
         <div class="mt-8">
@@ -694,7 +677,6 @@ watch(
             <li v-for="(item, index) in wishlist.items" :key="item.id">
               <WishlistItemCard
                 :item="item"
-                :claims-locked="claimsLocked"
                 :is-first="index === 0"
                 :is-last="index === wishlist.items.length - 1"
                 @edit="openEditItem(item)"
@@ -708,7 +690,12 @@ watch(
       </template>
     </template>
 
-    <PlanCheckoutDialog v-model="unlockOpen" :plan="upgradePlan" />
+    <PlanCheckoutDialog
+      v-model="unlockOpen"
+      :product="unlockProduct"
+      :event-id="event?.id"
+      :event-name="event?.name"
+    />
 
     <WishlistForm
       v-model="wishlistModalOpen"

@@ -23,7 +23,7 @@ import {
   PLAN_FEATURE_LABELS,
   PLAN_FEATURE_ORDER,
   formatPlanPrice,
-  planRank,
+  type BillingProduct,
   type PlanFeatureKey,
   type PlanTier,
 } from "@/lib/plans";
@@ -39,7 +39,7 @@ const loggingOut = ref(false);
 
 const billing = ref<BillingSummary | null>(null);
 const unlockOpen = ref(false);
-const selectedUpgrade = ref<Exclude<PlanTier, "FREE">>("PLUS");
+const selectedProduct = ref<BillingProduct>("PRO");
 
 const plan = computed<PlanTier>(() => billing.value?.plan ?? currentPlan.value);
 const planDefinition = computed(() => PLAN_CATALOG[plan.value]);
@@ -65,25 +65,19 @@ const benefitRows = computed(() =>
 );
 
 const upgrades = computed(() =>
-  (["PLUS", "PRO"] as const)
-    .filter((tier) => planRank(tier) > planRank(plan.value))
-    .map((tier) => ({ ...PLAN_CATALOG[tier], tier })),
+  plan.value === "FREE" ? [PLAN_CATALOG.PRO] : [],
 );
 
 const planDescription = computed(() => {
   if (plan.value === "FREE") {
-    return `Your Free plan includes ${planDefinition.value.activeWishlistLimit} active event and ${planDefinition.value.itemLimit} gifts per wishlist. Claim tracking is locked.`;
+    return `Your Free plan includes ${planDefinition.value.activeEventLimit} active event and ${planDefinition.value.itemLimit} gifts per wishlist. Unlock an event for ${formatPlanPrice(billing.value?.prices.EVENT_PASS ?? 990)} or go Pro for every celebration.`;
   }
 
-  if (plan.value === "PLUS") {
-    return "Up to 3 active events and unlimited gifts on every wishlist, with gift reservation tracking and priority support.";
-  }
-
-  return "Unlimited active events and gifts on every wishlist, with gift reservation tracking and priority support, plus guest media notes on the way.";
+  return "Up to 10 active events and unlimited gifts on every wishlist, with claimant names and priority support. Guest media notes are on the way.";
 });
 
-function openUpgrade(plan: Exclude<PlanTier, "FREE">) {
-  selectedUpgrade.value = plan;
+function openUpgrade() {
+  selectedProduct.value = "PRO";
   unlockOpen.value = true;
 }
 
@@ -232,8 +226,8 @@ onMounted(() => {
             v-for="upgrade in upgrades"
             :key="upgrade.tier"
             size="sm"
-            :variant="upgrade.tier === 'PRO' ? 'primary' : 'secondary'"
-            @click="openUpgrade(upgrade.tier)"
+            variant="primary"
+            @click="openUpgrade"
           >
             {{ upgrade.shortLabel }} · {{ formatPlanPrice(upgrade.priceSen) }}
           </BaseButton>
@@ -326,6 +320,6 @@ onMounted(() => {
       @confirm="confirmDelete"
     />
 
-    <PlanCheckoutDialog v-model="unlockOpen" :plan="selectedUpgrade" />
+    <PlanCheckoutDialog v-model="unlockOpen" :product="selectedProduct" />
   </section>
 </template>

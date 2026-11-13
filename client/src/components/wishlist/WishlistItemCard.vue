@@ -8,12 +8,8 @@ const props = withDefaults(
     item: WishlistItemDto;
     isFirst: boolean;
     isLast: boolean;
-    /** True when claim insights are hidden because the owner is on Free. */
-    claimsLocked?: boolean;
   }>(),
-  {
-    claimsLocked: false,
-  },
+  {},
 );
 
 const emit = defineEmits<{
@@ -117,27 +113,13 @@ const details = computed(() =>
       </ul>
 
       <div
-        v-if="claimsLocked"
+        v-if="item.isClaimed && item.claimantNamesLocked"
         class="mt-4 flex items-start gap-2.5 rounded-2xl border border-blush bg-cream px-3.5 py-2.5 text-sm text-ink/70"
       >
-        <svg
-          :width="16"
-          :height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="mt-0.5 shrink-0 text-rose"
-          aria-hidden="true"
-        >
-          <rect x="4" y="10" width="16" height="10" rx="2" />
-          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-        </svg>
+        <GiftIcon :size="16" class="mt-0.5 shrink-0 text-rose" />
         <p class="leading-snug">
-          Claim status hidden — upgrade to Plus or Pro to see how many gifts
-          are claimed.
+          Reserved — someone's getting you this gift! Unlock this event to see
+          who.
         </p>
       </div>
       <div

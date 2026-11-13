@@ -344,6 +344,21 @@ export type UpdateWishlistItemInput = z.infer<typeof updateWishlistItemSchema>;
 export type ReorderItemsInput = z.infer<typeof reorderItemsSchema>;
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
 
+/** One-time purchase: a lifetime Pro plan or an Event Pass for one event. */
+export const checkoutSchema = z
+  .object({
+    product: z.enum(["EVENT_PASS", "PRO"], {
+      error: "Choose an Event Pass or Pro to continue.",
+    }),
+    eventId: z.string().trim().min(1).optional(),
+  })
+  .refine((data) => data.product !== "EVENT_PASS" || Boolean(data.eventId), {
+    message: "Choose an event to unlock.",
+    path: ["eventId"],
+  });
+
+export type CheckoutInput = z.infer<typeof checkoutSchema>;
+
 /** Shape of a single field error returned to the client. */
 export interface FieldError {
   field: string;

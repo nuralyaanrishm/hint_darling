@@ -1,8 +1,11 @@
 import { Router } from "express";
-import type { Request } from "express";
+import { isEventUnlocked } from "../lib/entitlements.js";
 import { HttpError } from "../lib/errors.js";
 import { getOwnedWishlist } from "../lib/ownership.js";
-import { PLAN_CONFIG, hasClaimTracking, itemLimitFor } from "../lib/plans.js";
+import {
+  EVENT_PASS,
+  itemLimitFor,
+} from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
   toWishlistDto,
@@ -20,12 +23,13 @@ import { currentUserId, requireAuth } from "../middleware/auth.js";
 
 export const wishlistsRouter = Router();
 
-// Claim insights are a Plus/Pro feature; the serializer uses this to decide
-// whether claimed counts and per-item claim status are included in responses.
-function ownerViewer(req: Request): OwnerViewer {
-  return {
-    canViewClaims: req.auth ? hasClaimTracking(req.auth.user.plan) : false,
-  };
+// Claim status is public; only the guest's display name is gated, per event.
+async function viewerFor(
+  userId: string,
+  eventId: string,
+): Promise<OwnerViewer> {
+  const unlocked = await isEventUnlocked(userId, eventId);
+  return { canViewClaimantNames: unlocked, eventUnlocked: unlocked };
 }
 
 // Every wishlist and item route requires a signed-in owner.
@@ -33,21 +37,16 @@ wishlistsRouter.use(requireAuth);
 
 // GET /api/wishlists/:wishlistId — wishlist detail with its items.
 wishlistsRouter.get("/:wishlistId", async (req, res) => {
-  const viewer = ownerViewer(req);
-  const wishlist = await getOwnedWishlist(
-    currentUserId(req),
-    req.params.wishlistId,
-    { includeClaimantName: viewer.canViewClaims },
-  );
-  res.json({ wishlist: toWishlistDto(wishlist, viewer) });
+  const userId = currentUserId(req);
+  const owned = await getOwnedWishlist(userId, req.params.wishlistId);
+  const viewer = await viewerFor(userId, owned.event.id);
+  res.json({ wishlist: toWishlistDto(owned, viewer) });
 });
 
 // PATCH /api/wishlists/:wishlistId — update title/description.
 wishlistsRouter.patch("/:wishlistId", async (req, res) => {
-  const owned = await getOwnedWishlist(
-    currentUserId(req),
-    req.params.wishlistId,
-  );
+  const userId = currentUserId(req);
+  const owned = await getOwnedWishlist(userId, req.params.wishlistId);
   const data = parseOrThrow(updateWishlistSchema, req.body);
 
   await prisma.wishlist.update({
@@ -59,19 +58,17 @@ wishlistsRouter.patch("/:wishlistId", async (req, res) => {
     },
   });
 
-  const viewer = ownerViewer(req);
-  const wishlist = await getOwnedWishlist(currentUserId(req), owned.id, {
-    includeClaimantName: viewer.canViewClaims,
-  });
+  const viewer = await viewerFor(userId, owned.event.id);
+  const wishlist = await getOwnedWishlist(userId, owned.id);
   res.json({ wishlist: toWishlistDto(wishlist, viewer) });
 });
 
 // POST /api/wishlists/:wishlistId/items — append a gift item.
 //
-// Free accounts may add at most their plan's item limit per wishlist. Paid
-// tiers are unlimited. The count and insert run inside one transaction with the
-// wishlist row locked, so two simultaneous requests cannot both slip through on
-// the last free slot.
+// Without an unlocked event, a wishlist may hold at most the plan's item limit
+// (Free: five). An Event Pass or Pro account unlocks unlimited gifts. The count
+// and insert run inside one transaction with the wishlist row locked, so two
+// simultaneous requests cannot both slip through on the last free slot.
 wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
   const userId = currentUserId(req);
   const wishlist = await getOwnedWishlist(userId, req.params.wishlistId);
@@ -91,7 +88,12 @@ wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
       select: { plan: true },
     });
 
-    const itemLimit = itemLimitFor(owner.plan);
+    const unlocked = await isEventUnlocked(
+      userId,
+      wishlist.event.id,
+      tx,
+    );
+    const itemLimit = itemLimitFor(owner.plan, unlocked);
 
     if (itemLimit !== null) {
       const itemCount = await tx.wishlistItem.count({
@@ -99,10 +101,10 @@ wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
       });
 
       if (itemCount >= itemLimit) {
-        const plusPrice = PLAN_CONFIG.PLUS.priceSen / 100;
+        const passPrice = (EVENT_PASS.priceSen / 100).toFixed(2);
         throw new HttpError(
           402,
-          `Your ${PLAN_CONFIG[owner.plan].label} plan includes ${itemLimit} gifts per wishlist. Upgrade to Darling Plus for unlimited gifts from RM${plusPrice.toFixed(2)}.`,
+          `Your event includes ${itemLimit} gifts. Unlock this event for RM${passPrice} to add unlimited gifts.`,
           undefined,
           "ITEM_LIMIT_REACHED",
         );
@@ -132,21 +134,23 @@ wishlistsRouter.post("/:wishlistId/items", async (req, res) => {
         position,
       },
       include: {
-        claims: { where: { status: "CLAIMED" }, select: { id: true } },
+        claims: {
+          where: { status: "CLAIMED" },
+          select: { id: true, claimantName: true },
+        },
       },
     });
   });
 
-  res.status(201).json({ item: toWishlistItemDto(item, ownerViewer(req)) });
+  const viewer = await viewerFor(userId, wishlist.event.id);
+  res.status(201).json({ item: toWishlistItemDto(item, viewer) });
 });
 
 // PATCH /api/wishlists/:wishlistId/items/reorder — persist a new item order.
 // Registered before the `:itemId` route so "reorder" is not read as an id.
 wishlistsRouter.patch("/:wishlistId/items/reorder", async (req, res) => {
-  const wishlist = await getOwnedWishlist(
-    currentUserId(req),
-    req.params.wishlistId,
-  );
+  const userId = currentUserId(req);
+  const wishlist = await getOwnedWishlist(userId, req.params.wishlistId);
   const { itemIds } = parseOrThrow(reorderItemsSchema, req.body);
 
   const existing = await prisma.wishlistItem.findMany({
@@ -174,19 +178,15 @@ wishlistsRouter.patch("/:wishlistId/items/reorder", async (req, res) => {
     ),
   );
 
-  const viewer = ownerViewer(req);
-  const fresh = await getOwnedWishlist(currentUserId(req), wishlist.id, {
-    includeClaimantName: viewer.canViewClaims,
-  });
+  const viewer = await viewerFor(userId, wishlist.event.id);
+  const fresh = await getOwnedWishlist(userId, wishlist.id);
   res.json({ wishlist: toWishlistDto(fresh, viewer) });
 });
 
 // PATCH /api/wishlists/:wishlistId/items/:itemId — update a gift item.
 wishlistsRouter.patch("/:wishlistId/items/:itemId", async (req, res) => {
-  const wishlist = await getOwnedWishlist(
-    currentUserId(req),
-    req.params.wishlistId,
-  );
+  const userId = currentUserId(req);
+  const wishlist = await getOwnedWishlist(userId, req.params.wishlistId);
   const data = parseOrThrow(updateWishlistItemSchema, req.body);
 
   const item = await prisma.wishlistItem.findFirst({
@@ -197,7 +197,6 @@ wishlistsRouter.patch("/:wishlistId/items/:itemId", async (req, res) => {
     throw new HttpError(404, "Not found");
   }
 
-  const viewer = ownerViewer(req);
   const updated = await prisma.wishlistItem.update({
     where: { id: item.id },
     data: {
@@ -216,13 +215,12 @@ wishlistsRouter.patch("/:wishlistId/items/:itemId", async (req, res) => {
     include: {
       claims: {
         where: { status: "CLAIMED" },
-        select: viewer.canViewClaims
-          ? { id: true, claimantName: true }
-          : { id: true },
+        select: { id: true, claimantName: true },
       },
     },
   });
 
+  const viewer = await viewerFor(userId, wishlist.event.id);
   res.json({ item: toWishlistItemDto(updated, viewer) });
 });
 

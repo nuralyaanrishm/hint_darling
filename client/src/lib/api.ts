@@ -3,7 +3,12 @@
 // Session cookies are HTTP-only, and unsafe requests echo the CSRF cookie back
 // in the X-CSRF-Token header (the server enforces this on every mutation).
 
-import type { PlanDefinition, PlanFeatures, PlanTier } from "./plans";
+import type {
+  BillingProduct,
+  PlanDefinition,
+  PlanFeatures,
+  PlanTier,
+} from "./plans";
 
 const CSRF_COOKIE = "hd_csrf";
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -25,17 +30,33 @@ export interface AuthUser {
   createdAt: string;
 }
 
+export interface RecentPurchase {
+  product: BillingProduct;
+  amountSen: number;
+  paidAt: string | null;
+  eventId: string | null;
+  eventName: string | null;
+}
+
 export interface BillingSummary {
   plan: PlanTier;
   planLabel: string;
   planUnlockedAt: string | null;
-  activeWishlistLimit: number | null;
+  activeEventLimit: number | null;
   itemLimit: number | null;
   features: PlanFeatures;
   comingSoon: string[];
   isPaid: boolean;
-  prices: Record<PlanTier, number>;
+  prices: { FREE: number; PRO: number; EVENT_PASS: number };
   plans: PlanDefinition[];
+  eventPass: {
+    label: string;
+    shortLabel: string;
+    priceSen: number;
+    priceNote: "per event";
+  };
+  proLaunchPrice: boolean;
+  recentPurchase: RecentPurchase | null;
   currency: string;
 }
 
@@ -182,13 +203,17 @@ export async function getBilling(): Promise<BillingSummary> {
   return data.billing;
 }
 
-/** Starts a one-time Plus/Pro ToyyibPay checkout and returns its hosted URL. */
+/**
+ * Starts a one-time ToyyibPay checkout. An Event Pass needs the event it
+ * unlocks; Pro is account-wide.
+ */
 export async function createPlanCheckout(
-  plan: Exclude<PlanTier, "FREE">,
+  product: BillingProduct,
+  eventId?: string,
 ): Promise<{ paymentUrl: string }> {
   return request<{ paymentUrl: string }>("/billing/checkout", {
     method: "POST",
-    body: JSON.stringify({ plan }),
+    body: JSON.stringify({ product, eventId }),
   });
 }
 
@@ -196,11 +221,13 @@ export async function createPlanCheckout(
 export async function reconcilePurchase(): Promise<{
   billing: BillingSummary;
   reconciled: boolean;
+  activated: { product: BillingProduct; eventName: string | null }[];
 }> {
-  return request<{ billing: BillingSummary; reconciled: boolean }>(
-    "/billing/reconcile",
-    { method: "POST" },
-  );
+  return request<{
+    billing: BillingSummary;
+    reconciled: boolean;
+    activated: { product: BillingProduct; eventName: string | null }[];
+  }>("/billing/reconcile", { method: "POST" });
 }
 
 export interface RegisterPayload {
@@ -306,12 +333,12 @@ export interface WishlistItemDto {
   /** Number of active claims on this gift. At most one in this version. */
   claimedCount: number;
   /**
-   * The optional display name of the gift-giver. Only present for Pro owners;
-   * `null` for Free owners, unnamed guests, or unclaimed gifts.
+   * The optional display name of the gift-giver. Only present when this event is
+   * unlocked; `null` otherwise, for unnamed guests, or for unclaimed gifts.
    */
   claimantName: string | null;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
+  /** True when the owner must unlock this event to see who reserved gifts. */
+  claimantNamesLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -324,8 +351,10 @@ export interface WishlistDto {
   shareToken: string;
   privacyMode: PrivacyMode;
   isActive: boolean;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
+  /** True when the owner must unlock this event to see who reserved gifts. */
+  claimantNamesLocked: boolean;
+  /** True when this event has an Event Pass or the owner is on Pro. */
+  eventUnlocked: boolean;
   items: WishlistItemDto[];
   createdAt: string;
   updatedAt: string;
@@ -335,10 +364,8 @@ export interface WishlistSummary {
   id: string;
   title: string;
   itemCount: number;
-  /** How many gifts are currently reserved (zero for Free owners). Never reveals who. */
+  /** How many gifts are currently reserved. Never reveals who. */
   claimedCount: number;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
 }
 
 export interface EventSummary {
@@ -424,6 +451,16 @@ export async function updateEvent(
 
 export async function deleteEvent(id: string): Promise<void> {
   await request<void>(`/events/${id}`, { method: "DELETE" });
+}
+
+/** Hides a wishlist and frees an active-event slot without deleting data. */
+export async function archiveEvent(id: string): Promise<void> {
+  await request<void>(`/events/${id}/archive`, { method: "POST" });
+}
+
+/** Restores an archived wishlist when the plan has a free active-event slot. */
+export async function unarchiveEvent(id: string): Promise<void> {
+  await request<void>(`/events/${id}/unarchive`, { method: "POST" });
 }
 
 export async function createWishlist(

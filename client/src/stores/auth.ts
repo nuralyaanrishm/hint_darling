@@ -21,10 +21,8 @@ let initPromise: Promise<void> | null = null;
 const isAuthenticated = computed(() => user.value !== null);
 /** True when the server says this account may open the admin dashboard. */
 const isAdmin = computed(() => user.value?.isAdmin === true);
-/** The current one-time plan; signed-out visitors are treated as Free. */
+/** The current plan; signed-out visitors are treated as Free. */
 const currentPlan = computed<PlanTier>(() => user.value?.plan ?? "FREE");
-/** Gift reservation tracking is included on Plus and Pro. */
-const canViewClaims = computed(() => currentPlan.value !== "FREE");
 
 /**
  * Resolves the current session once. Safe to call from multiple places; the
@@ -94,7 +92,6 @@ export function useAuth() {
     isAuthenticated,
     isAdmin,
     currentPlan,
-    canViewClaims,
     initAuth,
     refreshUser,
     login,

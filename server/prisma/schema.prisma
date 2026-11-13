@@ -40,10 +40,16 @@ enum ClaimStatus {
   CANCELLED
 }
 
-/// One-time paid tiers. FREE is the default and cannot be bought.
+/// Account-level plan. FREE is the default and cannot be bought; PRO is a
+/// one-time lifetime upgrade. Per-event unlocks are stored as purchases instead.
 enum PlanTier {
   FREE
-  PLUS
+  PRO
+}
+
+/// What a one-time purchase bought: a lifetime Pro plan or an Event Pass.
+enum PurchaseProduct {
+  EVENT_PASS
   PRO
 }
 
@@ -131,8 +137,9 @@ model Event {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  wishlist Wishlist?
+  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  wishlist  Wishlist?
+  purchases Purchase[]
 
   @@index([ownerId])
   @@map("events")
@@ -217,30 +224,35 @@ enum PurchaseStatus {
   FAILED
 }
 
-/// A one-time ToyyibPay purchase that unlocks a paid plan.
-/// The raw ToyyibPay callback is kept for auditing and idempotent replay.
+/// A one-time ToyyibPay purchase: either a lifetime Pro plan or an Event Pass
+/// that unlocks a single event. The raw ToyyibPay callback is kept for auditing
+/// and idempotent replay.
 model Purchase {
-  id                String         @id @default(cuid())
+  id                String          @id @default(cuid())
   userId            String
-  status            PurchaseStatus @default(PENDING)
-  /// The tier this purchase unlocks. Older rows were all Pro unlocks.
-  plan              PlanTier       @default(PRO)
+  status            PurchaseStatus  @default(PENDING)
+  /// What this purchase unlocks.
+  product           PurchaseProduct @default(PRO)
+  /// Set for EVENT_PASS purchases; null for lifetime Pro purchases.
+  eventId           String?
   /// Price in sen (RM9.90 = 990). Never accepted from the client.
   amountSen         Int
-  currency          String         @default("MYR") @db.VarChar(3)
+  currency          String          @default("MYR") @db.VarChar(3)
   /// Opaque reference sent to ToyyibPay as billExternalReferenceNo.
-  externalReference String         @unique
-  billCode          String?        @unique
-  refno             String?        @unique
+  externalReference String          @unique
+  billCode          String?         @unique
+  refno             String?         @unique
   transactionId     String?
   paymentChannel    String?
   paidAt            DateTime?
   rawCallback       Json?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event? @relation(fields: [eventId], references: [id], onDelete: SetNull)
 
   @@index([userId, status])
+  @@index([eventId, status])
   @@map("purchases")
 }

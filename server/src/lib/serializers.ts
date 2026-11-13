@@ -5,13 +5,14 @@ import type { EventType, PrivacyMode } from "@prisma/client";
 // might round). Structural types keep these usable with any include/select.
 
 /**
- * Owner-facing serializers need to know the viewer's plan because claim
- * insights are a Pro feature. Free owners still receive their items, but the
- * serializer withholds claim counts and status so the client can show an
- * "unlock Pro" prompt instead.
+ * Owner-facing serializers need to know whether *this event* is unlocked. Claim
+ * status is always included (guests can see it on the share link anyway); the
+ * guest's display name is only included for unlocked events.
  */
 export interface OwnerViewer {
-  canViewClaims: boolean;
+  canViewClaimantNames: boolean;
+  /** True when the event has an Event Pass or the owner is on Pro. */
+  eventUnlocked: boolean;
 }
 
 interface ItemRecord {
@@ -32,8 +33,8 @@ interface ItemRecord {
   updatedAt: Date;
   /**
    * Active claims. Raw user ids and management tokens are never selected for
-   * owner views. The optional display name is only loaded for Pro owners, who
-   * are allowed to see who reserved a gift.
+   * owner views. The display name is loaded with the owner query but only
+   * serialised for unlocked events (Event Pass or Pro).
    */
   claims?: { id: string; claimantName?: string | null }[] | null;
 }
@@ -83,12 +84,12 @@ export interface WishlistItemDto {
   /** Number of active claims. At most one in this version. */
   claimedCount: number;
   /**
-   * The optional display name of the gift-giver. Only present for Pro owners;
-   * `null` for Free owners, unnamed guests, or unclaimed gifts.
+   * The optional display name of the gift-giver. Only present when this event is
+   * unlocked; `null` otherwise, for unnamed guests, or for unclaimed gifts.
    */
   claimantName: string | null;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
+  /** True when the owner must unlock this event to see who reserved gifts. */
+  claimantNamesLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,15 +98,13 @@ export function toWishlistItemDto(
   item: ItemRecord,
   viewer: OwnerViewer,
 ): WishlistItemDto {
-  // Active claim ids and (for Pro owners) the optional claimant display name
-  // are loaded for owner views; the claimant's user id and management token are
-  // never selected or serialised. Free owners are not told about claims at all
-  // until they unlock Pro.
-  const claimsLocked = !viewer.canViewClaims;
-  const claimedCount = claimsLocked ? 0 : (item.claims?.length ?? 0);
-  const claimantName = claimsLocked
-    ? null
-    : (item.claims?.find((claim) => claim.claimantName)?.claimantName ?? null);
+  // Claim status is public information (the share page shows it), so every
+  // owner receives it. Only the guest's display name is gated by the event
+  // unlock. Claimant user ids and management tokens are never selected.
+  const claimedCount = item.claims?.length ?? 0;
+  const claimantName = viewer.canViewClaimantNames
+    ? (item.claims?.find((claim) => claim.claimantName)?.claimantName ?? null)
+    : null;
 
   return {
     id: item.id,
@@ -124,7 +123,7 @@ export function toWishlistItemDto(
     isClaimed: claimedCount > 0,
     claimedCount,
     claimantName,
-    claimsLocked,
+    claimantNamesLocked: !viewer.canViewClaimantNames,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
@@ -139,8 +138,10 @@ export interface WishlistDto {
   shareToken: string;
   privacyMode: PrivacyMode;
   isActive: boolean;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
+  /** True when the owner must unlock this event to see who reserved gifts. */
+  claimantNamesLocked: boolean;
+  /** True when this event has an Event Pass or the owner is on Pro. */
+  eventUnlocked: boolean;
   items: WishlistItemDto[];
   createdAt: string;
   updatedAt: string;
@@ -158,7 +159,8 @@ export function toWishlistDto(
     shareToken: wishlist.shareToken,
     privacyMode: wishlist.privacyMode,
     isActive: wishlist.isActive,
-    claimsLocked: !viewer.canViewClaims,
+    claimantNamesLocked: !viewer.canViewClaimantNames,
+    eventUnlocked: viewer.eventUnlocked,
     items: wishlist.items.map((item) => toWishlistItemDto(item, viewer)),
     createdAt: wishlist.createdAt.toISOString(),
     updatedAt: wishlist.updatedAt.toISOString(),
@@ -169,10 +171,8 @@ export interface WishlistSummaryDto {
   id: string;
   title: string;
   itemCount: number;
-  /** How many gifts are currently reserved (zero for Free owners). Never reveals who. */
+  /** How many gifts are currently reserved. Never reveals who. */
   claimedCount: number;
-  /** True when the owner's plan doesn't include claim insights. */
-  claimsLocked: boolean;
 }
 
 export interface EventSummaryDto {
@@ -201,7 +201,7 @@ export function toEventSummaryDto(
       items?: { id: string }[];
     } | null;
   },
-  viewer: OwnerViewer,
+  _viewer?: OwnerViewer,
 ): EventSummaryDto {
   return {
     id: event.id,
@@ -218,10 +218,7 @@ export function toEventSummaryDto(
           id: event.wishlist.id,
           title: event.wishlist.title,
           itemCount: event.wishlist._count.items,
-          claimedCount: viewer.canViewClaims
-            ? (event.wishlist.items?.length ?? 0)
-            : 0,
-          claimsLocked: !viewer.canViewClaims,
+          claimedCount: event.wishlist.items?.length ?? 0,
         }
       : null,
     createdAt: event.createdAt.toISOString(),

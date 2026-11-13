@@ -1,11 +1,11 @@
 import { Router } from "express";
-import type { Request } from "express";
+import { isEventUnlocked } from "../lib/entitlements.js";
 import { HttpError } from "../lib/errors.js";
 import { getOwnedEvent, getOwnedWishlist } from "../lib/ownership.js";
 import {
   PLAN_CONFIG,
-  activeWishlistLimitFor,
-  hasClaimTracking,
+  activeEventLimitFor,
+  type PlanTierName,
 } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
@@ -26,12 +26,50 @@ import { currentUserId, requireAuth } from "../middleware/auth.js";
 
 export const eventsRouter = Router();
 
-// Claim insights are a Plus/Pro feature; the serializer uses this to decide
-// whether claimed counts and per-item claim status are included in responses.
-function ownerViewer(req: Request): OwnerViewer {
+// Claim status is public (guests see it on the share link); only the guest's
+// display name is gated, and only per event.
+function ownerViewer(
+  canViewClaimantNames: boolean,
+  eventUnlocked: boolean,
+): OwnerViewer {
+  return { canViewClaimantNames, eventUnlocked };
+}
+
+const lockedViewer: OwnerViewer = {
+  canViewClaimantNames: false,
+  eventUnlocked: false,
+};
+
+async function viewerFor(userId: string, eventId: string): Promise<OwnerViewer> {
+  const unlocked = await isEventUnlocked(userId, eventId);
+  return ownerViewer(unlocked, unlocked);
+}
+
+/**
+ * Active means the wishlist is visible and its event has not started yet.
+ * Ended events keep their data but no longer occupy a plan slot.
+ */
+function activeWishlistWhere(userId: string, now: Date) {
   return {
-    canViewClaims: req.auth ? hasClaimTracking(req.auth.user.plan) : false,
+    isActive: true,
+    event: {
+      ownerId: userId,
+      OR: [
+        { eventStartsAt: null },
+        { eventStartsAt: { gt: now } },
+      ],
+    },
   };
+}
+
+function eventLimitMessage(plan: PlanTierName, limit: number): string {
+  if (plan === "FREE") {
+    return `Your Free plan includes ${limit} active event. Upgrade to Darling Pro for up to ${PLAN_CONFIG.PRO.activeEventLimit} events — RM${(
+      PLAN_CONFIG.PRO.priceSen / 100
+    ).toFixed(2)} one-time.`;
+  }
+
+  return `Darling Pro includes ${limit} active events at once. Archive an event to free up a slot.`;
 }
 
 // Every event route requires a signed-in owner.
@@ -59,7 +97,7 @@ eventsRouter.get("/", async (req, res) => {
   });
 
   res.json({
-    events: events.map((event) => toEventSummaryDto(event, ownerViewer(req))),
+    events: events.map((event) => toEventSummaryDto(event, lockedViewer)),
   });
 });
 
@@ -81,21 +119,23 @@ eventsRouter.post("/", async (req, res) => {
     },
   });
 
-  res.status(201).json({ event: toEventDto({ ...event, wishlist: null }, ownerViewer(req)) });
+  res
+    .status(201)
+    .json({ event: toEventDto({ ...event, wishlist: null }, lockedViewer) });
 });
 
 // GET /api/events/:eventId — event detail with its wishlist and items.
 eventsRouter.get("/:eventId", async (req, res) => {
-  const viewer = ownerViewer(req);
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId, {
-    includeClaimantName: viewer.canViewClaims,
-  });
+  const userId = currentUserId(req);
+  const viewer = await viewerFor(userId, req.params.eventId);
+  const event = await getOwnedEvent(userId, req.params.eventId);
   res.json({ event: toEventDto(event, viewer) });
 });
 
 // PATCH /api/events/:eventId — update an event.
 eventsRouter.patch("/:eventId", async (req, res) => {
-  const owned = await getOwnedEvent(currentUserId(req), req.params.eventId);
+  const userId = currentUserId(req);
+  const owned = await getOwnedEvent(userId, req.params.eventId);
   const data = parseOrThrow(updateEventSchema, req.body);
 
   await prisma.event.update({
@@ -112,10 +152,8 @@ eventsRouter.patch("/:eventId", async (req, res) => {
     },
   });
 
-  const viewer = ownerViewer(req);
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId, {
-    includeClaimantName: viewer.canViewClaims,
-  });
+  const viewer = await viewerFor(userId, owned.id);
+  const event = await getOwnedEvent(userId, owned.id);
   res.json({ event: toEventDto(event, viewer) });
 });
 
@@ -126,11 +164,79 @@ eventsRouter.delete("/:eventId", async (req, res) => {
   res.status(204).end();
 });
 
+// POST /api/events/:eventId/archive — hide the wishlist and free up a slot.
+// The event and its gifts stay intact, so an archived list can be restored.
+eventsRouter.post("/:eventId/archive", async (req, res) => {
+  const userId = currentUserId(req);
+  const event = await getOwnedEvent(userId, req.params.eventId);
+
+  if (!event.wishlist) {
+    throw new HttpError(404, "Not found");
+  }
+
+  await prisma.wishlist.update({
+    where: { id: event.wishlist.id },
+    data: { isActive: false },
+  });
+
+  res.status(204).end();
+});
+
+// POST /api/events/:eventId/unarchive — restore an archived wishlist when the
+// plan still has a free active-event slot.
+eventsRouter.post("/:eventId/unarchive", async (req, res) => {
+  const userId = currentUserId(req);
+  const event = await getOwnedEvent(userId, req.params.eventId);
+
+  if (!event.wishlist) {
+    throw new HttpError(404, "Not found");
+  }
+
+  if (event.wishlist.isActive) {
+    res.status(204).end();
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+
+    const owner = await tx.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { plan: true },
+    });
+
+    const limit = activeEventLimitFor(owner.plan);
+
+    if (limit !== null) {
+      const activeCount = await tx.wishlist.count({
+        where: activeWishlistWhere(userId, new Date()),
+      });
+
+      if (activeCount >= limit) {
+        throw new HttpError(
+          402,
+          eventLimitMessage(owner.plan, limit),
+          undefined,
+          "WISHLIST_LIMIT_REACHED",
+        );
+      }
+    }
+
+    await tx.wishlist.update({
+      where: { id: event.wishlist!.id },
+      data: { isActive: true },
+    });
+  });
+
+  res.status(204).end();
+});
+
 // POST /api/events/:eventId/wishlist — create the event's wishlist.
 //
-// Each plan includes a set number of active events (Free 1, Plus 3, Pro
-// unlimited). The user row is locked while we count and create so two
-// simultaneous requests cannot both slip through on the last slot.
+// Free includes one active event, Pro ten concurrent ones. Wishlists whose
+// event has already started no longer count, so a host can move on to the next
+// celebration without upgrading. The user row is locked while we count and
+// create so two simultaneous requests cannot both slip through on the last slot.
 eventsRouter.post("/:eventId/wishlist", async (req, res) => {
   const userId = currentUserId(req);
   const event = await getOwnedEvent(userId, req.params.eventId);
@@ -149,22 +255,17 @@ eventsRouter.post("/:eventId/wishlist", async (req, res) => {
       select: { plan: true },
     });
 
-    const limit = activeWishlistLimitFor(owner.plan);
+    const limit = activeEventLimitFor(owner.plan);
 
     if (limit !== null) {
       const activeCount = await tx.wishlist.count({
-        where: { isActive: true, event: { ownerId: userId } },
+        where: activeWishlistWhere(userId, new Date()),
       });
 
       if (activeCount >= limit) {
-        const nextPlan = owner.plan === "FREE" ? "PLUS" : "PRO";
-        const next = PLAN_CONFIG[nextPlan];
-        const price = (next.priceSen / 100).toFixed(2);
-        const noun = limit === 1 ? "event" : "events";
-
         throw new HttpError(
           402,
-          `Your ${PLAN_CONFIG[owner.plan].label} plan includes ${limit} active ${noun}. Upgrade to ${next.label} for more from RM${price}.`,
+          eventLimitMessage(owner.plan, limit),
           undefined,
           "WISHLIST_LIMIT_REACHED",
         );
@@ -183,12 +284,14 @@ eventsRouter.post("/:eventId/wishlist", async (req, res) => {
     });
   });
 
-  res.status(201).json({ wishlist: toWishlistDto(wishlist, ownerViewer(req)) });
+  const viewer = await viewerFor(userId, event.id);
+  res.status(201).json({ wishlist: toWishlistDto(wishlist, viewer) });
 });
 
-// PATCH /api/events/:eventId/wishlist — update title/description.
+// PATCH /api/events/:eventId/wishlist — update title/description and privacy.
 eventsRouter.patch("/:eventId/wishlist", async (req, res) => {
-  const event = await getOwnedEvent(currentUserId(req), req.params.eventId);
+  const userId = currentUserId(req);
+  const event = await getOwnedEvent(userId, req.params.eventId);
 
   if (!event.wishlist) {
     throw new HttpError(404, "Not found");
@@ -205,11 +308,7 @@ eventsRouter.patch("/:eventId/wishlist", async (req, res) => {
     },
   });
 
-  const viewer = ownerViewer(req);
-  const wishlist = await getOwnedWishlist(
-    currentUserId(req),
-    event.wishlist.id,
-    { includeClaimantName: viewer.canViewClaims },
-  );
+  const viewer = await viewerFor(userId, event.id);
+  const wishlist = await getOwnedWishlist(userId, event.wishlist.id);
   res.json({ wishlist: toWishlistDto(wishlist, viewer) });
 });

@@ -27,9 +27,13 @@ async function check() {
 
   try {
     const result = await reconcilePurchase();
+    const purchase = result.billing.recentPurchase;
 
-    if (result.billing.plan !== "FREE") {
-      planLabel.value = result.billing.planLabel;
+    if (result.billing.plan !== "FREE" || purchase) {
+      planLabel.value =
+        purchase?.product === "EVENT_PASS"
+          ? `Your Event Pass${purchase.eventName ? ` for ${purchase.eventName}` : ""}`
+          : result.billing.planLabel;
       await refreshUser();
       state.value = "success";
       return;

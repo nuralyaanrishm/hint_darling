@@ -1,11 +1,6 @@
 import { Router } from "express";
-import { HttpError } from "../lib/errors.js";
-import { isPlanTier } from "../lib/plans.js";
-import {
-  createPlanCheckout,
-  getBillingSummary,
-  reconcilePendingPurchases,
-} from "../lib/purchases.js";
+import { createCheckout, getBillingSummary, reconcilePendingPurchases } from "../lib/purchases.js";
+import { checkoutSchema, parseOrThrow } from "../lib/validation.js";
 import { currentUserId, requireAuth } from "../middleware/auth.js";
 import { billingLimiter } from "../middleware/rateLimit.js";
 
@@ -19,26 +14,20 @@ billingRouter.get("/", async (req, res) => {
   res.json({ billing: await getBillingSummary(currentUserId(req)) });
 });
 
-// POST /api/billing/checkout — start a one-time Plus or Pro checkout.
+// POST /api/billing/checkout — start a one-time Event Pass or Pro checkout.
 billingRouter.post("/checkout", billingLimiter, async (req, res) => {
-  const plan = (req.body as { plan?: unknown } | undefined)?.plan;
-
-  if (!isPlanTier(plan) || plan === "FREE") {
-    throw new HttpError(
-      400,
-      "Choose Plus or Pro to continue.",
-      undefined,
-      "INVALID_PLAN",
-    );
-  }
-
-  const result = await createPlanCheckout(currentUserId(req), plan);
+  const data = parseOrThrow(checkoutSchema, req.body);
+  const result = await createCheckout(
+    currentUserId(req),
+    data.product,
+    data.eventId ?? null,
+  );
   res.status(201).json({ paymentUrl: result.paymentUrl });
 });
 
-// POST /api/billing/unlock — deprecated alias that buys Pro.
+// POST /api/billing/unlock — deprecated alias that buys the lifetime Pro plan.
 billingRouter.post("/unlock", billingLimiter, async (req, res) => {
-  const result = await createPlanCheckout(currentUserId(req), "PRO");
+  const result = await createCheckout(currentUserId(req), "PRO");
   res.status(201).json({ paymentUrl: result.paymentUrl });
 });
 
@@ -51,5 +40,6 @@ billingRouter.post("/reconcile", billingLimiter, async (req, res) => {
   res.json({
     billing: await getBillingSummary(userId),
     reconciled: result.reconciled,
+    activated: result.activated,
   });
 });

@@ -340,8 +340,8 @@ describe("gift claiming", () => {
     });
     assert.ok(claimRow.claimantUserId, "registered claimant is recorded");
 
-    // The owner's own event detail must not expose the gift-giver. Free owners
-    // get no claim identity at all, not even the account name.
+    // The owner's own event detail must not expose the gift-giver. A locked
+    // event gets no claimant name at all, not even the account name.
     const ownerEvent = await owner.request("GET", `/api/events/${eventId}`);
     assert.equal(ownerEvent.status, 200);
     const serialised = JSON.stringify(ownerEvent.body);

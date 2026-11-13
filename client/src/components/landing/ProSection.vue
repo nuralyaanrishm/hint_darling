@@ -5,34 +5,38 @@ import BaseButton from "@/components/ui/BaseButton.vue";
 import PlanCheckoutDialog from "@/components/billing/PlanCheckoutDialog.vue";
 import { useAuth } from "@/stores/auth";
 import {
-  PLAN_CATALOG,
   PLAN_FEATURE_LABELS,
   PLAN_FEATURE_ORDER,
-  PLAN_ORDER,
+  PRICING_COLUMNS,
+  PRICING_PRODUCTS,
+  PRO_IS_LAUNCH_PRICE,
   formatPlanPrice,
   planRank,
+  type BillingProduct,
   type PlanFeatureKey,
   type PlanTier,
+  type PricingColumn,
+  type PricingProduct,
 } from "@/lib/plans";
 
 const router = useRouter();
 const { isAuthenticated, currentPlan } = useAuth();
 
-type PaidPlan = Exclude<PlanTier, "FREE">;
-
 type PricingRow =
   | {
       kind: "limit";
-      key: "activeWishlistLimit" | "itemLimit";
+      key: "activeEventLimit" | "itemLimit";
       label: string;
     }
   | { kind: "feature"; key: PlanFeatureKey; label: string };
 
-const plans = PLAN_ORDER.map((tier) => PLAN_CATALOG[tier]);
+const columns: PricingColumn[] = PRICING_PRODUCTS.map(
+  (product) => PRICING_COLUMNS[product],
+);
 
 const rows: PricingRow[] = [
-  { kind: "limit", key: "activeWishlistLimit", label: "Active Event" },
-  { kind: "limit", key: "itemLimit", label: "Gift items" },
+  { kind: "limit", key: "activeEventLimit", label: "Active events" },
+  { kind: "limit", key: "itemLimit", label: "Gifts per list" },
   ...PLAN_FEATURE_ORDER.map((key) => ({
     kind: "feature" as const,
     key,
@@ -40,45 +44,70 @@ const rows: PricingRow[] = [
   })),
 ];
 
-const headerClass: Record<PlanTier, string> = {
+const headerClass: Record<PricingProduct, string> = {
   FREE: "bg-plan-free",
-  PLUS: "bg-plan-plus",
+  EVENT_PASS: "bg-plan-plus",
   PRO: "bg-plan-pro",
 };
 
-const selectedPlan = ref<PaidPlan | null>(null);
+const selectedProduct = ref<BillingProduct | null>(null);
 const checkoutOpen = ref(false);
 
-const checkoutPlan = computed<PaidPlan>(() => selectedPlan.value ?? "PLUS");
-
-function isCurrent(plan: PlanTier): boolean {
-  return isAuthenticated.value && plan === currentPlan.value;
+function isPlanTier(key: PricingProduct): key is PlanTier {
+  return key !== "EVENT_PASS";
 }
 
-function isLower(plan: PlanTier): boolean {
-  return isAuthenticated.value && planRank(plan) < planRank(currentPlan.value);
+function isCurrent(column: PricingColumn): boolean {
+  return (
+    isPlanTier(column.key) &&
+    isAuthenticated.value &&
+    column.key === currentPlan.value
+  );
 }
 
-function ctaLabel(plan: PlanTier): string {
-  if (isCurrent(plan)) return "Your plan";
-  if (isLower(plan)) return "Included";
-  if (plan === "FREE") return "Start free";
-  return `Choose ${PLAN_CATALOG[plan].shortLabel}`;
+function isIncluded(column: PricingColumn): boolean {
+  // Pro includes everything an Event Pass includes.
+  return (
+    column.key === "EVENT_PASS" &&
+    isAuthenticated.value &&
+    currentPlan.value === "PRO"
+  );
 }
 
-function ctaDisabled(plan: PlanTier): boolean {
-  return isCurrent(plan) || isLower(plan);
+function ctaLabel(column: PricingColumn): string {
+  if (isCurrent(column)) return "Your plan";
+  if (isIncluded(column)) return "Included in Pro";
+  if (column.key === "FREE") return "Start free";
+  if (column.key === "EVENT_PASS") return "Choose Event Pass";
+  return `Choose ${column.shortLabel}`;
 }
 
-function ctaVariant(plan: PlanTier): "primary" | "secondary" {
-  if (!isAuthenticated.value) return plan === "FREE" ? "secondary" : "primary";
-  return planRank(plan) > planRank(currentPlan.value) ? "primary" : "secondary";
+function ctaDisabled(column: PricingColumn): boolean {
+  return isCurrent(column) || isIncluded(column);
 }
 
-function choosePlan(plan: PlanTier) {
-  if (ctaDisabled(plan)) return;
+function ctaVariant(column: PricingColumn): "primary" | "secondary" {
+  if (!isAuthenticated.value) {
+    return column.key === "FREE" ? "secondary" : "primary";
+  }
+  if (isPlanTier(column.key)) {
+    return planRank(column.key) > planRank(currentPlan.value)
+      ? "primary"
+      : "secondary";
+  }
+  return currentPlan.value === "PRO" ? "secondary" : "primary";
+}
 
-  if (plan === "FREE") {
+function choose(column: PricingColumn) {
+  if (ctaDisabled(column)) return;
+
+  if (column.key === "FREE") {
+    void router.push(isAuthenticated.value ? "/dashboard" : "/register");
+    return;
+  }
+
+  if (column.key === "EVENT_PASS") {
+    // A pass belongs to one event, so it is bought from that event's page.
     void router.push(isAuthenticated.value ? "/dashboard" : "/register");
     return;
   }
@@ -88,23 +117,25 @@ function choosePlan(plan: PlanTier) {
     return;
   }
 
-  if (planRank(plan) <= planRank(currentPlan.value)) return;
+  if (planRank(column.key) <= planRank(currentPlan.value)) return;
 
-  selectedPlan.value = plan;
+  selectedProduct.value = "PRO";
   checkoutOpen.value = true;
 }
 
-function limitLabel(plan: PlanTier, key: "activeWishlistLimit" | "itemLimit") {
-  const value = PLAN_CATALOG[plan][key];
-  return value === null ? "Unlimited" : String(value);
+function limitLabel(column: PricingColumn, key: PricingRow["key"]) {
+  if (key !== "activeEventLimit" && key !== "itemLimit") return "";
+  const value = column[key];
+  if (value === null) return "Unlimited";
+  return String(value);
 }
 
-function hasFeature(plan: PlanTier, key: PlanFeatureKey): boolean {
-  return PLAN_CATALOG[plan].features[key];
+function hasFeature(column: PricingColumn, key: PlanFeatureKey): boolean {
+  return column.features[key];
 }
 
-function isSoon(plan: PlanTier, key: PlanFeatureKey): boolean {
-  return PLAN_CATALOG[plan].comingSoon.includes(key);
+function isSoon(column: PricingColumn, key: PlanFeatureKey): boolean {
+  return column.comingSoon.includes(key);
 }
 
 function rowBackground(index: number): string {
@@ -121,36 +152,40 @@ function rowBackground(index: number): string {
           Plans &amp; Pricing
         </h2>
         <p class="text-ink/70">
-          One-time payments. Choose the plan that fits your celebration — it's
-          yours forever.
+          Start free. Unlock one event for RM9.90, or go Pro once and cover
+          every celebration — no subscriptions.
         </p>
       </div>
 
       <!-- Desktop comparison table -->
       <div class="mt-14 hidden md:block">
-        <div
-          class="grid grid-cols-[1.15fr_repeat(3,minmax(0,1fr))] gap-3"
-        >
+        <div class="grid grid-cols-[1.15fr_repeat(3,minmax(0,1fr))] gap-3">
           <div></div>
           <div
-            v-for="plan in plans"
-            :key="plan.tier"
+            v-for="column in columns"
+            :key="column.key"
             class="relative flex min-h-[9.5rem] flex-col items-center justify-center rounded-[1.4rem] border border-ink/15 px-4 py-6 text-center"
-            :class="headerClass[plan.tier]"
+            :class="headerClass[column.key]"
           >
             <span
-              v-if="plan.tier === 'PRO'"
+              v-if="column.key === 'EVENT_PASS'"
               class="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-plan-popular px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-white shadow-sm"
             >
-              Most Recommended
+              Most Popular
             </span>
-            <p class="text-lg font-semibold text-ink">{{ plan.label }}</p>
+            <p class="text-lg font-semibold text-ink">{{ column.label }}</p>
             <p class="mt-2 font-display text-4xl text-ink">
-              {{ formatPlanPrice(plan.priceSen) }}
+              {{ formatPlanPrice(column.priceSen) }}
             </p>
             <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-ink/55">
-              One-time
+              {{ column.priceNote === "per event" ? "Per event" : "One-time" }}
             </p>
+            <span
+              v-if="column.key === 'PRO' && PRO_IS_LAUNCH_PRICE"
+              class="mt-2 rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/60"
+            >
+              Launch price
+            </span>
           </div>
         </div>
 
@@ -167,21 +202,21 @@ function rowBackground(index: number): string {
                 {{ row.label }}
               </div>
               <div
-                v-for="plan in plans"
-                :key="`${row.label}-${plan.tier}`"
-                class="flex items-center justify-center border-l border-ink/15 px-4 py-4 text-sm text-ink/85"
+                v-for="column in columns"
+                :key="`${row.label}-${column.key}`"
+                class="flex items-center justify-center border-l border-ink/15 px-4 py-4 text-center text-sm text-ink/85"
                 :class="[
                   rowBackground(index),
                   index === 0 ? '' : 'border-t border-ink/15',
                 ]"
               >
                 <template v-if="row.kind === 'limit'">
-                  {{ limitLabel(plan.tier, row.key) }}
+                  {{ limitLabel(column, row.key) }}
                 </template>
                 <template v-else>
                   <span class="flex items-center justify-center">
                     <span
-                      v-if="isSoon(plan.tier, row.key)"
+                      v-if="isSoon(column, row.key)"
                       class="rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/55"
                     >
                       Soon
@@ -190,13 +225,13 @@ function rowBackground(index: number): string {
                       v-else
                       class="flex h-6 w-6 items-center justify-center rounded-full text-white"
                       :class="
-                        hasFeature(plan.tier, row.key)
+                        hasFeature(column, row.key)
                           ? 'bg-plan-free'
                           : 'bg-soft-pink'
                       "
                     >
                       <svg
-                        v-if="hasFeature(plan.tier, row.key)"
+                        v-if="hasFeature(column, row.key)"
                         width="13"
                         height="13"
                         viewBox="0 0 24 24"
@@ -224,7 +259,7 @@ function rowBackground(index: number): string {
                       </svg>
                       <span class="sr-only">
                         {{
-                          hasFeature(plan.tier, row.key)
+                          hasFeature(column, row.key)
                             ? "Included"
                             : "Not included"
                         }}
@@ -239,15 +274,19 @@ function rowBackground(index: number): string {
 
         <div class="mt-4 grid grid-cols-[1.15fr_repeat(3,minmax(0,1fr))] gap-2">
           <div></div>
-          <div v-for="plan in plans" :key="`cta-${plan.tier}`" class="px-1">
+          <div
+            v-for="column in columns"
+            :key="`cta-${column.key}`"
+            class="px-1"
+          >
             <BaseButton
               block
               size="sm"
-              :variant="ctaVariant(plan.tier)"
-              :disabled="ctaDisabled(plan.tier)"
-              @click="choosePlan(plan.tier)"
+              :variant="ctaVariant(column)"
+              :disabled="ctaDisabled(column)"
+              @click="choose(column)"
             >
-              {{ ctaLabel(plan.tier) }}
+              {{ ctaLabel(column) }}
             </BaseButton>
           </div>
         </div>
@@ -256,52 +295,61 @@ function rowBackground(index: number): string {
       <!-- Mobile plan cards -->
       <div class="mt-12 space-y-6 md:hidden">
         <div
-          v-for="plan in plans"
-          :key="`mobile-${plan.tier}`"
+          v-for="column in columns"
+          :key="`mobile-${column.key}`"
           class="overflow-hidden rounded-[1.6rem] border border-blush/80 bg-white/70"
         >
           <div
             class="relative px-5 py-6 text-center"
-            :class="[headerClass[plan.tier], plan.tier === 'PRO' ? 'pt-9' : '']"
+            :class="[
+              headerClass[column.key],
+              column.key === 'EVENT_PASS' ? 'pt-9' : '',
+            ]"
           >
             <span
-              v-if="plan.tier === 'PRO'"
+              v-if="column.key === 'EVENT_PASS'"
               class="absolute top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-plan-popular px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white"
             >
-              Most Recommended
+              Most Popular
             </span>
-            <p class="text-lg font-semibold text-ink">{{ plan.label }}</p>
+            <p class="text-lg font-semibold text-ink">{{ column.label }}</p>
             <p class="mt-1 font-display text-4xl text-ink">
-              {{ formatPlanPrice(plan.priceSen) }}
+              {{ formatPlanPrice(column.priceSen) }}
             </p>
             <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-ink/55">
-              /month
+              {{ column.priceNote === "per event" ? "Per event" : "One-time" }}
             </p>
+            <span
+              v-if="column.key === 'PRO' && PRO_IS_LAUNCH_PRICE"
+              class="mt-2 inline-flex rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/60"
+            >
+              Launch price
+            </span>
           </div>
 
           <dl class="divide-y divide-ink/10">
             <div
               v-for="row in rows"
-              :key="`mobile-${plan.tier}-${row.label}`"
+              :key="`mobile-${column.key}-${row.label}`"
               class="flex items-center justify-between gap-4 px-5 py-3 text-sm text-ink/85"
             >
               <dt>{{ row.label }}</dt>
               <dd class="shrink-0">
                 <template v-if="row.kind === 'limit'">
-                  {{ limitLabel(plan.tier, row.key) }}
+                  {{ limitLabel(column, row.key) }}
                 </template>
                 <span v-else class="flex items-center justify-end gap-2">
                   <span
-                    v-if="!isSoon(plan.tier, row.key)"
+                    v-if="!isSoon(column, row.key)"
                     class="order-last flex h-6 w-6 items-center justify-center rounded-full text-white"
                     :class="
-                      hasFeature(plan.tier, row.key)
+                      hasFeature(column, row.key)
                         ? 'bg-plan-free'
                         : 'bg-soft-pink'
                     "
                   >
                     <svg
-                      v-if="hasFeature(plan.tier, row.key)"
+                      v-if="hasFeature(column, row.key)"
                       width="13"
                       height="13"
                       viewBox="0 0 24 24"
@@ -329,14 +377,14 @@ function rowBackground(index: number): string {
                     </svg>
                     <span class="sr-only">
                       {{
-                        hasFeature(plan.tier, row.key)
+                        hasFeature(column, row.key)
                           ? "Included"
                           : "Not included"
                       }}
                     </span>
                   </span>
                   <span
-                    v-if="isSoon(plan.tier, row.key)"
+                    v-if="isSoon(column, row.key)"
                     class="rounded-full bg-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink/55"
                   >
                     Soon
@@ -350,21 +398,26 @@ function rowBackground(index: number): string {
             <BaseButton
               block
               size="sm"
-              :variant="ctaVariant(plan.tier)"
-              :disabled="ctaDisabled(plan.tier)"
-              @click="choosePlan(plan.tier)"
+              :variant="ctaVariant(column)"
+              :disabled="ctaDisabled(column)"
+              @click="choose(column)"
             >
-              {{ ctaLabel(plan.tier) }}
+              {{ ctaLabel(column) }}
             </BaseButton>
           </div>
         </div>
       </div>
+
+      <p class="mt-8 text-center text-xs text-ink/55">
+        An Event Pass is bought from the event you want to unlock — open it from
+        your dashboard. Pro covers every event you run.
+      </p>
     </div>
   </section>
 
   <PlanCheckoutDialog
-    v-if="selectedPlan"
+    v-if="selectedProduct"
     v-model="checkoutOpen"
-    :plan="checkoutPlan"
+    :product="selectedProduct"
   />
 </template>

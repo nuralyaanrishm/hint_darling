@@ -172,19 +172,34 @@ async function createOwner(label: string): Promise<TestClient> {
   return owner;
 }
 
-async function createWishlist(owner: TestClient): Promise<string> {
+async function createEvent(
+  owner: TestClient,
+  overrides: Record<string, unknown> = {},
+): Promise<string> {
   const event = await owner.request("POST", "/api/events", {
-    json: { name: "Aisha & Danial", type: "WEDDING" },
+    json: { name: "Aisha & Danial", type: "WEDDING", ...overrides },
   });
   assert.equal(event.status, 201);
+  return event.body.event.id as string;
+}
 
-  const wishlist = await owner.request(
-    "POST",
-    `/api/events/${event.body.event.id}/wishlist`,
-    { json: { title: "Our wishlist" } },
-  );
+async function createWishlistFor(
+  owner: TestClient,
+  eventId: string,
+): Promise<string> {
+  const wishlist = await owner.request("POST", `/api/events/${eventId}/wishlist`, {
+    json: { title: "Our wishlist" },
+  });
   assert.equal(wishlist.status, 201);
   return wishlist.body.wishlist.id as string;
+}
+
+async function createWishlist(
+  owner: TestClient,
+): Promise<{ eventId: string; wishlistId: string }> {
+  const eventId = await createEvent(owner);
+  const wishlistId = await createWishlistFor(owner, eventId);
+  return { eventId, wishlistId };
 }
 
 async function addItem(
@@ -197,24 +212,49 @@ async function addItem(
   });
 }
 
+interface Checkout {
+  orderId: string;
+  billcode: string;
+  amountSen: number;
+}
+
 async function startCheckout(
   owner: TestClient,
-  plan: "PLUS" | "PRO" = "PRO",
-): Promise<{ orderId: string; billcode: string }> {
+  product: "EVENT_PASS" | "PRO",
+  eventId?: string,
+): Promise<Checkout> {
   const response = await owner.request("POST", "/api/billing/checkout", {
-    json: { plan },
+    json: eventId ? { product, eventId } : { product },
   });
   assert.equal(response.status, 201);
   assert.match(response.body.paymentUrl, /\/tst\d+$/);
 
-  const call = createBillCalls.at(-1);
-  assert.ok(call);
   const billCode = response.body.paymentUrl.split("/").at(-1) as string;
+  const bill = bills.get(billCode);
+  assert.ok(bill);
 
   return {
-    orderId: call.billExternalReferenceNo as string,
+    orderId: bill.externalReference,
     billcode: billCode,
+    amountSen: bill.amountSen,
   };
+}
+
+async function payBill(
+  checkout: Checkout,
+  refno: string,
+): Promise<void> {
+  const callback = await postCallback(
+    callbackFields({
+      status: "1",
+      orderId: checkout.orderId,
+      refno,
+      billcode: checkout.billcode,
+      amount: String(checkout.amountSen),
+    }),
+  );
+  assert.equal(callback.status, 200);
+  assert.equal(callback.text, "OK");
 }
 
 before(async () => {
@@ -248,12 +288,12 @@ after(async () => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("one-time plan purchases", () => {
-  it("keeps Free at five gifts, then unlocks Plus after a valid callback", async (t) => {
+describe("one-time purchases", () => {
+  it("keeps Free at five gifts, then unlocks one event with an Event Pass", async (t) => {
     if (skipWithoutDb(t)) return;
 
-    const owner = await createOwner("plus");
-    const wishlistId = await createWishlist(owner);
+    const owner = await createOwner("pass");
+    const { eventId, wishlistId } = await createWishlist(owner);
 
     for (let index = 1; index <= 5; index += 1) {
       const added = await addItem(owner, wishlistId, `Gift ${index}`);
@@ -268,17 +308,18 @@ describe("one-time plan purchases", () => {
     assert.equal(before.status, 200);
     assert.equal(before.body.billing.plan, "FREE");
     assert.equal(before.body.billing.itemLimit, 5);
-    assert.equal(before.body.billing.activeWishlistLimit, 1);
-    assert.equal(before.body.billing.prices.PLUS, 990);
-    assert.equal(before.body.billing.features.claimTracking, false);
+    assert.equal(before.body.billing.activeEventLimit, 1);
+    assert.equal(before.body.billing.prices.EVENT_PASS, 990);
+    assert.equal(before.body.billing.prices.PRO, 9900);
+    // Claim status is free; only the guest's name is gated.
+    assert.equal(before.body.billing.features.claimStatus, true);
+    assert.equal(before.body.billing.features.claimNames, false);
 
-    const callsBefore = createBillCalls.length;
-    const { orderId, billcode } = await startCheckout(owner, "PLUS");
-    assert.equal(createBillCalls.length, callsBefore + 1);
+    const checkout = await startCheckout(owner, "EVENT_PASS", eventId);
+    assert.equal(checkout.amountSen, 990);
 
     const call = createBillCalls.at(-1);
     assert.ok(call);
-    assert.equal(call.billAmount, "990");
     assert.equal(call.billPriceSetting, "1");
     assert.equal(call.billPayorInfo, "0");
     assert.equal(
@@ -290,40 +331,48 @@ describe("one-time plan purchases", () => {
       "https://example.test/billing/return",
     );
 
-    const callback = await postCallback(
-      callbackFields({
-        status: "1",
-        orderId,
-        refno: "ref-plus",
-        billcode,
-        amount: "990",
-      }),
-    );
-    assert.equal(callback.status, 200);
-    assert.equal(callback.text, "OK");
+    await payBill(checkout, "ref-pass");
 
     const after = await owner.request("GET", "/api/billing");
-    assert.equal(after.body.billing.plan, "PLUS");
-    assert.ok(after.body.billing.planUnlockedAt);
-    assert.equal(after.body.billing.itemLimit, null);
-    assert.equal(after.body.billing.activeWishlistLimit, 3);
-    assert.equal(after.body.billing.features.claimTracking, true);
+    // A pass is not an account plan; the account stays Free.
+    assert.equal(after.body.billing.plan, "FREE");
+    assert.equal(after.body.billing.recentPurchase.product, "EVENT_PASS");
+    assert.equal(after.body.billing.recentPurchase.eventId, eventId);
+
+    const event = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(event.body.event.wishlist.eventUnlocked, true);
+    assert.equal(event.body.event.wishlist.claimantNamesLocked, false);
 
     const addedAfterUnlock = await addItem(owner, wishlistId, "Gift 6");
     assert.equal(addedAfterUnlock.status, 201);
 
+    // The unlock is scoped to this event only.
+    const otherEventId = await createEvent(owner, { name: "Birthday" });
+    const otherWishlistId = await createWishlistFor(owner, otherEventId);
+    const otherEvent = await owner.request("GET", `/api/events/${otherEventId}`);
+    assert.equal(otherEvent.body.event.wishlist.eventUnlocked, false);
+
+    for (let index = 1; index <= 5; index += 1) {
+      const added = await addItem(owner, otherWishlistId, `Other ${index}`);
+      assert.equal(added.status, 201);
+    }
+    const otherBlocked = await addItem(owner, otherWishlistId, "Other 6");
+    assert.equal(otherBlocked.status, 402);
+    assert.equal(otherBlocked.body.error.code, "ITEM_LIMIT_REACHED");
+
     const already = await owner.request("POST", "/api/billing/checkout", {
-      json: { plan: "PLUS" },
+      json: { product: "EVENT_PASS", eventId },
     });
     assert.equal(already.status, 409);
-    assert.equal(already.body.error.code, "PLAN_NOT_UPGRADABLE");
+    assert.equal(already.body.error.code, "EVENT_ALREADY_UNLOCKED");
 
+    // A repeated valid callback is harmless.
     const duplicate = await postCallback(
       callbackFields({
         status: "1",
-        orderId,
-        refno: "ref-plus",
-        billcode,
+        orderId: checkout.orderId,
+        refno: "ref-pass",
+        billcode: checkout.billcode,
         amount: "990",
       }),
     );
@@ -331,161 +380,165 @@ describe("one-time plan purchases", () => {
     assert.equal(duplicate.text, "OK");
   });
 
-  it("upgrades Plus to Pro at the full price and never downgrades", async (t) => {
+  it("sells Pro as a lifetime plan that covers every event", async (t) => {
     if (skipWithoutDb(t)) return;
 
-    const owner = await createOwner("upgrade");
-    await createWishlist(owner);
-
-    const plus = await startCheckout(owner, "PLUS");
-    await postCallback(
-      callbackFields({
-        status: "1",
-        orderId: plus.orderId,
-        refno: "ref-plus-upgrade",
-        billcode: plus.billcode,
-        amount: "990",
-      }),
-    );
-
-    const plusBilling = await owner.request("GET", "/api/billing");
-    assert.equal(plusBilling.body.billing.plan, "PLUS");
+    const owner = await createOwner("pro");
+    const { eventId, wishlistId } = await createWishlist(owner);
 
     const callsBefore = createBillCalls.length;
     const pro = await startCheckout(owner, "PRO");
     assert.equal(createBillCalls.length, callsBefore + 1);
-    assert.notEqual(pro.orderId, plus.orderId);
+    assert.equal(pro.amountSen, 9900);
 
-    const proCall = createBillCalls.at(-1);
-    assert.ok(proCall);
-    assert.equal(proCall.billAmount, "1990");
+    await payBill(pro, "ref-pro");
 
-    await postCallback(
-      callbackFields({
-        status: "1",
-        orderId: pro.orderId,
-        refno: "ref-pro-upgrade",
-        billcode: pro.billcode,
-        amount: "1990",
-      }),
-    );
+    const billing = await owner.request("GET", "/api/billing");
+    assert.equal(billing.body.billing.plan, "PRO");
+    assert.ok(billing.body.billing.planUnlockedAt);
+    assert.equal(billing.body.billing.itemLimit, null);
+    assert.equal(billing.body.billing.activeEventLimit, 10);
+    assert.equal(billing.body.billing.features.claimNames, true);
 
-    const proBilling = await owner.request("GET", "/api/billing");
-    assert.equal(proBilling.body.billing.plan, "PRO");
-    assert.equal(proBilling.body.billing.activeWishlistLimit, null);
+    const event = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(event.body.event.wishlist.eventUnlocked, true);
 
-    const downgrade = await owner.request("POST", "/api/billing/checkout", {
-      json: { plan: "PLUS" },
+    const added = await addItem(owner, wishlistId, "Anything");
+    assert.equal(added.status, 201);
+
+    const again = await owner.request("POST", "/api/billing/checkout", {
+      json: { product: "PRO" },
     });
-    assert.equal(downgrade.status, 409);
-    assert.equal(downgrade.body.error.code, "PLAN_NOT_UPGRADABLE");
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error.code, "PLAN_NOT_UPGRADABLE");
+
+    // Pro already includes every event; a pass would be redundant.
+    const pass = await owner.request("POST", "/api/billing/checkout", {
+      json: { product: "EVENT_PASS", eventId },
+    });
+    assert.equal(pass.status, 409);
+    assert.equal(pass.body.error.code, "EVENT_PASS_NOT_NEEDED");
   });
 
-  it("enforces the active wishlist limit per plan", async (t) => {
+  it("enforces the active event limit per plan, and ended events free the slot", async (t) => {
     if (skipWithoutDb(t)) return;
 
-    const owner = await createOwner("wishlist-limit");
+    const owner = await createOwner("event-limit");
 
-    async function createEvent(): Promise<string> {
-      const event = await owner.request("POST", "/api/events", {
-        json: { name: "Celebration", type: "WEDDING" },
-      });
-      assert.equal(event.status, 201);
-      return event.body.event.id as string;
-    }
+    const first = await createEvent(owner);
+    await createWishlistFor(owner, first);
 
-    async function createList(eventId: string) {
-      return owner.request("POST", `/api/events/${eventId}/wishlist`, {
-        json: { title: "Our wishlist" },
-      });
-    }
-
-    const event1 = await createEvent();
-    const first = await createList(event1);
-    assert.equal(first.status, 201);
-
-    const event2 = await createEvent();
-    const blocked = await createList(event2);
+    const second = await createEvent(owner, { name: "Second" });
+    const blocked = await owner.request(
+      "POST",
+      `/api/events/${second}/wishlist`,
+      { json: { title: "Our wishlist" } },
+    );
     assert.equal(blocked.status, 402);
     assert.equal(blocked.body.error.code, "WISHLIST_LIMIT_REACHED");
 
-    const plus = await startCheckout(owner, "PLUS");
-    await postCallback(
-      callbackFields({
-        status: "1",
-        orderId: plus.orderId,
-        refno: "ref-plus-lists",
-        billcode: plus.billcode,
-        amount: "990",
-      }),
+    // A wishlist whose event has already started no longer occupies the slot.
+    const ended = await createEvent(owner, {
+      name: "Already started",
+      startsAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const endedWishlist = await owner.request(
+      "POST",
+      `/api/events/${ended}/wishlist`,
+      { json: { title: "Past celebration" } },
     );
+    assert.equal(endedWishlist.status, 201);
 
-    const second = await createList(event2);
-    assert.equal(second.status, 201);
+    // Archiving the first event frees the slot for the second.
+    const archived = await owner.request("POST", `/api/events/${first}/archive`);
+    assert.equal(archived.status, 204);
 
-    const event3 = await createEvent();
-    const third = await createList(event3);
-    assert.equal(third.status, 201);
+    const afterArchive = await owner.request(
+      "POST",
+      `/api/events/${second}/wishlist`,
+      { json: { title: "Our wishlist" } },
+    );
+    assert.equal(afterArchive.status, 201);
 
-    const event4 = await createEvent();
-    const blockedAgain = await createList(event4);
-    assert.equal(blockedAgain.status, 402);
-    assert.equal(blockedAgain.body.error.code, "WISHLIST_LIMIT_REACHED");
+    // Restoring the archived event would exceed the Free limit again.
+    const restored = await owner.request("POST", `/api/events/${first}/unarchive`);
+    assert.equal(restored.status, 402);
 
+    // Pro raises the cap to ten concurrent events.
     const pro = await startCheckout(owner, "PRO");
-    await postCallback(
-      callbackFields({
-        status: "1",
-        orderId: pro.orderId,
-        refno: "ref-pro-lists",
-        billcode: pro.billcode,
-        amount: "1990",
-      }),
-    );
+    await payBill(pro, "ref-pro-events");
 
-    const fourth = await createList(event4);
-    assert.equal(fourth.status, 201);
+    for (let index = 3; index <= 11; index += 1) {
+      const eventId = await createEvent(owner, { name: `Event ${index}` });
+      const created = await owner.request(
+        "POST",
+        `/api/events/${eventId}/wishlist`,
+        { json: { title: "Our wishlist" } },
+      );
+      assert.equal(created.status, 201);
+    }
+
+    const twelfth = await createEvent(owner, { name: "Twelfth" });
+    const capped = await owner.request(
+      "POST",
+      `/api/events/${twelfth}/wishlist`,
+      { json: { title: "Our wishlist" } },
+    );
+    assert.equal(capped.status, 402);
+    assert.equal(capped.body.error.code, "WISHLIST_LIMIT_REACHED");
   });
 
-  it("reuses a recent pending checkout for the same plan only", async (t) => {
+  it("reuses a recent pending checkout for the same product and event only", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const owner = await createOwner("reuse");
-    await createWishlist(owner);
+    const { eventId } = await createWishlist(owner);
 
-    const first = await startCheckout(owner, "PLUS");
-    const callsAfterFirst = createBillCalls.length;
+    const callsBefore = createBillCalls.length;
+    const first = await startCheckout(owner, "EVENT_PASS", eventId);
+    assert.equal(createBillCalls.length, callsBefore + 1);
 
-    const second = await startCheckout(owner, "PLUS");
+    const second = await startCheckout(owner, "EVENT_PASS", eventId);
     assert.equal(second.orderId, first.orderId);
     assert.equal(second.billcode, first.billcode);
-    assert.equal(createBillCalls.length, callsAfterFirst);
+    assert.equal(createBillCalls.length, callsBefore + 1);
 
     const pro = await startCheckout(owner, "PRO");
     assert.notEqual(pro.orderId, first.orderId);
-    assert.equal(createBillCalls.length, callsAfterFirst + 1);
+    assert.equal(createBillCalls.length, callsBefore + 2);
   });
 
-  it("rejects unknown plans and invalid signatures or amounts", async (t) => {
+  it("rejects unknown products, foreign events, invalid signatures and amounts", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const owner = await createOwner("invalid");
-    await createWishlist(owner);
+    const { eventId } = await createWishlist(owner);
 
-    const invalidPlan = await owner.request("POST", "/api/billing/checkout", {
-      json: { plan: "FREE" },
+    const unknown = await owner.request("POST", "/api/billing/checkout", {
+      json: { product: "PLUS" },
     });
-    assert.equal(invalidPlan.status, 400);
-    assert.equal(invalidPlan.body.error.code, "INVALID_PLAN");
+    assert.equal(unknown.status, 400);
 
-    const { orderId, billcode } = await startCheckout(owner, "PLUS");
+    const missingEvent = await owner.request("POST", "/api/billing/checkout", {
+      json: { product: "EVENT_PASS" },
+    });
+    assert.equal(missingEvent.status, 400);
+
+    const stranger = await createOwner("invalid-stranger");
+    const strangerEvent = await createEvent(stranger);
+    const foreign = await owner.request("POST", "/api/billing/checkout", {
+      json: { product: "EVENT_PASS", eventId: strangerEvent },
+    });
+    assert.equal(foreign.status, 404);
+
+    const checkout = await startCheckout(owner, "EVENT_PASS", eventId);
 
     const badHash = await postCallback(
       callbackFields({
         status: "1",
-        orderId,
+        orderId: checkout.orderId,
         refno: "ref-bad",
-        billcode,
+        billcode: checkout.billcode,
         amount: "990",
         hash: "0".repeat(32),
       }),
@@ -495,54 +548,50 @@ describe("one-time plan purchases", () => {
     const wrongAmount = await postCallback(
       callbackFields({
         status: "1",
-        orderId,
+        orderId: checkout.orderId,
         refno: "ref-wrong",
-        billcode,
+        billcode: checkout.billcode,
         amount: "800",
       }),
     );
     assert.equal(wrongAmount.status, 400);
 
-    const stillFree = await owner.request("GET", "/api/billing");
-    assert.equal(stillFree.body.billing.plan, "FREE");
+    const stillLocked = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(stillLocked.body.event.wishlist.eventUnlocked, false);
 
-    const valid = await postCallback(
-      callbackFields({
-        status: "1",
-        orderId,
-        refno: "ref-good",
-        billcode,
-        amount: "990",
-      }),
-    );
-    assert.equal(valid.status, 200);
+    await payBill(checkout, "ref-good");
 
-    const upgraded = await owner.request("GET", "/api/billing");
-    assert.equal(upgraded.body.billing.plan, "PLUS");
+    const unlocked = await owner.request("GET", `/api/events/${eventId}`);
+    assert.equal(unlocked.body.event.wishlist.eventUnlocked, true);
   });
 
   it("reconciles a payment when the callback was missed", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const owner = await createOwner("reconcile");
-    await createWishlist(owner);
-    const { billcode } = await startCheckout(owner, "PLUS");
+    const { eventId } = await createWishlist(owner);
+    const checkout = await startCheckout(owner, "EVENT_PASS", eventId);
 
-    const bill = bills.get(billcode);
+    const bill = bills.get(checkout.billcode);
     assert.ok(bill);
     bill.paid = true;
 
     const reconciled = await owner.request("POST", "/api/billing/reconcile");
     assert.equal(reconciled.status, 200);
     assert.equal(reconciled.body.reconciled, true);
-    assert.equal(reconciled.body.billing.plan, "PLUS");
+    assert.equal(reconciled.body.activated[0].product, "EVENT_PASS");
+    assert.equal(reconciled.body.activated[0].eventName, "Aisha & Danial");
+    assert.equal(
+      reconciled.body.billing.recentPurchase.product,
+      "EVENT_PASS",
+    );
   });
 
   it("cannot exceed five items under concurrent adds", async (t) => {
     if (skipWithoutDb(t)) return;
 
     const owner = await createOwner("race");
-    const wishlistId = await createWishlist(owner);
+    const { wishlistId } = await createWishlist(owner);
 
     const results = await Promise.all(
       Array.from({ length: 6 }, (_, index) =>
