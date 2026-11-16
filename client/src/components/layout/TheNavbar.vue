@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 import BaseButton from "@/components/ui/BaseButton.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
+import ProfileMenu from "@/components/layout/ProfileMenu.vue";
 import { useAuth } from "@/stores/auth";
 
 const route = useRoute();
-const router = useRouter();
-const { isAuthenticated, isAdmin, logout } = useAuth();
+const { isAuthenticated } = useAuth();
 
 const menuOpen = ref(false);
-const loggingOut = ref(false);
 
 const links = [
   { label: "How It Works", to: "/#how-it-works" },
@@ -20,17 +19,6 @@ const links = [
 
 function closeMenu() {
   menuOpen.value = false;
-}
-
-async function onLogout() {
-  closeMenu();
-  loggingOut.value = true;
-  try {
-    await logout();
-    await router.push("/login");
-  } finally {
-    loggingOut.value = false;
-  }
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -74,83 +62,61 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
           {{ link.label }}
         </RouterLink>
 
-        <template v-if="isAuthenticated">
-          <RouterLink
-            to="/claims"
-            class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-          >
-            My Gifts
-          </RouterLink>
-          <RouterLink
-            to="/dashboard"
-            class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-          >
-            Me
-          </RouterLink>
-          <RouterLink
-            v-if="isAdmin"
-            to="/admin"
-            class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-          >
-            Admin
-          </RouterLink>
-          <button
-            type="button"
-            :disabled="loggingOut"
-            class="text-sm text-ink/75 transition-colors hover:text-rose disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-            @click="onLogout"
-          >
-            {{ loggingOut ? "Logging out…" : "Log out" }}
-          </button>
-        </template>
-
-        <template v-else>
-          <RouterLink
-            to="/login"
-            class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-          >
-            Log In
-          </RouterLink>
-          <BaseButton to="/register" size="sm">Create Your Wishlist</BaseButton>
-        </template>
+        <RouterLink
+          v-if="!isAuthenticated"
+          to="/login"
+          class="text-sm text-ink/75 transition-colors hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+        >
+          Log In
+        </RouterLink>
       </div>
 
-      <!-- Mobile menu toggle -->
-      <button
-        type="button"
-        class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-blush text-ink transition-colors hover:bg-blush/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream md:hidden"
-        :aria-expanded="menuOpen"
-        aria-controls="mobile-menu"
-        :aria-label="menuOpen ? 'Close menu' : 'Open menu'"
-        @click="menuOpen = !menuOpen"
-      >
-        <svg
-          v-if="!menuOpen"
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          aria-hidden="true"
+      <div class="flex items-center gap-2">
+        <div v-if="!isAuthenticated" class="hidden md:block">
+          <BaseButton to="/register" size="sm">
+            Create Your Wishlist
+          </BaseButton>
+        </div>
+
+        <ProfileMenu v-if="isAuthenticated" />
+
+        <!-- Mobile menu toggle -->
+        <button
+          type="button"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-blush text-ink transition-colors hover:bg-blush/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose focus-visible:ring-offset-2 focus-visible:ring-offset-cream md:hidden"
+          :aria-expanded="menuOpen"
+          aria-controls="mobile-menu"
+          :aria-label="menuOpen ? 'Close menu' : 'Open menu'"
+          @click="menuOpen = !menuOpen"
         >
-          <path d="M4 7h16M4 12h16M4 17h16" />
-        </svg>
-        <svg
-          v-else
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          aria-hidden="true"
-        >
-          <path d="M6 6l12 12M18 6L6 18" />
-        </svg>
-      </button>
+          <svg
+            v-if="!menuOpen"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+          <svg
+            v-else
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
     </nav>
 
     <!-- Mobile menu panel -->
@@ -169,37 +135,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
           {{ link.label }}
         </RouterLink>
 
-        <template v-if="isAuthenticated">
-          <RouterLink
-            to="/claims"
-            class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
-          >
-            My Gifts
-          </RouterLink>
-          <RouterLink
-            to="/dashboard"
-            class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
-          >
-            Me
-          </RouterLink>
-          <RouterLink
-            v-if="isAdmin"
-            to="/admin"
-            class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
-          >
-            Admin
-          </RouterLink>
-          <button
-            type="button"
-            :disabled="loggingOut"
-            class="rounded-xl px-3 py-3 text-left text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"
-            @click="onLogout"
-          >
-            {{ loggingOut ? "Logging out…" : "Log out" }}
-          </button>
-        </template>
-
-        <template v-else>
+        <template v-if="!isAuthenticated">
           <RouterLink
             to="/login"
             class="rounded-xl px-3 py-3 text-sm text-ink/80 transition-colors hover:bg-blush/40 hover:text-rose focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose"

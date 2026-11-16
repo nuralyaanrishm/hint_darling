@@ -23,6 +23,8 @@ declare module "vue-router" {
     /** Only for allowlisted admin accounts (server enforces it too). */
     requiresAdmin?: boolean;
     guestOnly?: boolean;
+    /** Signed-in pages use the app shell; everything else keeps the marketing chrome. */
+    layout?: "app" | "marketing";
   }
 }
 
@@ -73,6 +75,7 @@ const router = createRouter({
       meta: {
         title: "Dashboard",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -82,6 +85,7 @@ const router = createRouter({
       meta: {
         title: "Create an event",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -91,6 +95,7 @@ const router = createRouter({
       meta: {
         title: "Event",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -100,6 +105,7 @@ const router = createRouter({
       meta: {
         title: "Edit event",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -127,6 +133,7 @@ const router = createRouter({
       meta: {
         title: "Payment",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -137,6 +144,7 @@ const router = createRouter({
         title: "Your gifts",
         description: "View and manage the gifts you've claimed.",
         requiresAuth: true,
+        layout: "app",
       },
     },
     {
@@ -147,6 +155,7 @@ const router = createRouter({
         title: "Admin",
         requiresAuth: true,
         requiresAdmin: true,
+        layout: "app",
       },
     },
     {

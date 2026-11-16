@@ -30,12 +30,11 @@ import {
 
 const route = useRoute();
 const router = useRouter();
-const { user, logout, currentPlan } = useAuth();
+const { user, currentPlan } = useAuth();
 
 const events = ref<EventSummary[]>([]);
 const loading = ref(true);
 const loadError = ref<string | null>(null);
-const loggingOut = ref(false);
 
 const billing = ref<BillingSummary | null>(null);
 const unlockOpen = ref(false);
@@ -109,16 +108,6 @@ async function loadEvents() {
       : "We couldn't load your events.";
   } finally {
     loading.value = false;
-  }
-}
-
-async function onLogout() {
-  loggingOut.value = true;
-  try {
-    await logout();
-    await router.push("/login");
-  } finally {
-    loggingOut.value = false;
   }
 }
 
