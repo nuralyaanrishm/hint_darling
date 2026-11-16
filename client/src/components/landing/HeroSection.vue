@@ -2,6 +2,7 @@
 import BaseButton from "@/components/ui/BaseButton.vue";
 import HeartIcon from "@/components/decor/HeartIcon.vue";
 import FloralSprig from "@/components/decor/FloralSprig.vue";
+import BowRibbon from "@/components/decor/BowRibbon.vue";
 </script>
 
 <template>
@@ -70,30 +71,12 @@ import FloralSprig from "@/components/decor/FloralSprig.vue";
               class="absolute bottom-4 right-4 text-sage-deep/70"
             />
 
-            <svg
-              width="120"
-              height="66"
-              viewBox="0 0 72 40"
-              fill="none"
-              class="mx-auto text-soft-pink"
-              aria-hidden="true"
-            >
-              <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M36 20c-6-9-19-12-24-6-3.6 4.4 1.4 11.6 8 10.4 5.4-1 11-4.4 16-4.4" />
-                <path d="M36 20c6-9 19-12 24-6 3.6 4.4-1.4 11.6-8 10.4-5.4-1-11-4.4-16-4.4" />
-                <path d="M36 20c-2.4 6.6-6.5 12.6-10.5 15.6" />
-                <path d="M36 20c2.4 6.6 6.5 12.6 10.5 15.6" />
-              </g>
-              <circle cx="36" cy="20" r="3.2" fill="currentColor" />
-            </svg>
+            <BowRibbon />
 
             <p class="mt-4 font-display text-4xl text-ink">Hint, Darling</p>
             <p class="mt-1 text-xs uppercase tracking-[0.3em] text-rose">
               A wishlist by you
             </p>
-          </div>
-
-          <div class="mt-5 flex items-center justify-between text-left">
           </div>
         </div>
 
