@@ -72,6 +72,48 @@ export const resendVerificationLimiter = rateLimit({
 });
 
 /**
+ * Limits how often a password-reset email can be requested from one IP. The
+ * per-account cooldown in `passwordReset.ts` handles the rest.
+ */
+export const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isTest ? 10_000 : 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res
+      .status(429)
+      .json(jsonHandler("Too many reset requests. Please try again later."));
+  },
+});
+
+/** Limits reset-code guessing for a single IP. */
+export const resetPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isTest ? 10_000 : 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res
+      .status(429)
+      .json(jsonHandler("Too many attempts. Please request a new code."));
+  },
+});
+
+/** Limits password changes from a signed-in account. */
+export const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isTest ? 10_000 : 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res
+      .status(429)
+      .json(jsonHandler("Too many attempts. Please try again later."));
+  },
+});
+
+/**
  * Limits public wishlist lookups. Share tokens are 256-bit secrets that cannot
  * practically be guessed, but a cap still blunts scrapers and token probing.
  */

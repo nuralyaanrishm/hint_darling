@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { isAdminEmail } from "../lib/admins.js";
-import { sendVerificationEmail } from "../lib/email.js";
+import { sendPasswordResetEmail, sendVerificationEmail } from "../lib/email.js";
 import {
   VERIFICATION_TTL_MINUTES,
   checkVerificationCode,
@@ -24,6 +24,12 @@ import {
   type GoogleProfile,
 } from "../lib/googleOAuth.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
+import {
+  RESET_TTL_MINUTES,
+  checkPasswordResetCode,
+  clearPasswordResetCode,
+  issuePasswordResetCode,
+} from "../lib/passwordReset.js";
 import type { PlanTierName } from "../lib/plans.js";
 import { prisma } from "../lib/prisma.js";
 import {
@@ -31,24 +37,32 @@ import {
   clearCsrfCookie,
   clearSessionCookie,
   createSession,
+  deleteOtherSessions,
   deleteSession,
   setSessionCookie,
 } from "../lib/session.js";
 import { generateToken } from "../lib/tokens.js";
 import {
+  changePasswordSchema,
+  forgotPasswordSchema,
   formatZodError,
   loginSchema,
   registerSchema,
   resendVerificationSchema,
+  resetPasswordSchema,
   verifyEmailSchema,
 } from "../lib/validation.js";
 import {
+  changePasswordLimiter,
+  forgotPasswordLimiter,
   googleOAuthLimiter,
   loginLimiter,
   registerLimiter,
   resendVerificationLimiter,
+  resetPasswordLimiter,
   verifyEmailLimiter,
 } from "../middleware/rateLimit.js";
+import { currentUserId, requireAuth } from "../middleware/auth.js";
 import type { Request, Response } from "express";
 
 export const authRouter = Router();
@@ -64,6 +78,8 @@ interface PublicUser {
   email: string;
   plan: PlanTierName;
   planUnlockedAt: string | null;
+  /** False for Google-only accounts until they set a password. */
+  hasPassword: boolean;
   isAdmin: boolean;
   createdAt: string;
 }
@@ -72,6 +88,7 @@ function toPublicUser(user: {
   id: string;
   name: string;
   email: string;
+  passwordHash: string | null;
   plan: PlanTierName;
   planUnlockedAt: Date | null;
   createdAt: Date;
@@ -82,6 +99,7 @@ function toPublicUser(user: {
     email: user.email,
     plan: user.plan,
     planUnlockedAt: user.planUnlockedAt?.toISOString() ?? null,
+    hasPassword: Boolean(user.passwordHash),
     // Only ever describes the caller; the admin list itself is never exposed.
     isAdmin: isAdminEmail(user.email),
     createdAt: user.createdAt.toISOString(),
@@ -444,6 +462,222 @@ authRouter.post(
       message:
         "If that email needs verification, a new code is on its way.",
     });
+  },
+);
+
+// POST /api/auth/forgot-password — emails a reset code. Always answers the same
+// way so it cannot be used to discover which addresses have accounts.
+authRouter.post(
+  "/forgot-password",
+  forgotPasswordLimiter,
+  async (req, res) => {
+    const parsed = forgotPasswordSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "Please check the form and try again.",
+        formatZodError(parsed.error),
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: parsed.data.email },
+    });
+
+    // Unverified accounts cannot sign in yet, so a reset would only confuse.
+    if (user?.emailVerifiedAt) {
+      const issued = await issuePasswordResetCode(user.id);
+
+      if (issued.sent && issued.code) {
+        try {
+          await sendPasswordResetEmail({
+            to: user.email,
+            name: user.name,
+            code: issued.code,
+            expiresInMinutes: RESET_TTL_MINUTES,
+          });
+        } catch (error) {
+          // Stay generic: surfacing delivery failures here would reveal that
+          // the address has an account.
+          await clearPasswordResetCode(user.id).catch(() => undefined);
+          console.error("Failed to send password reset email:", error);
+        }
+      }
+    }
+
+    res.status(202).json({
+      message:
+        "If an account exists for that email, a reset code is on its way.",
+    });
+  },
+);
+
+// POST /api/auth/reset-password — checks the code, sets the new password and
+// signs the user in. Every other session is revoked first.
+authRouter.post("/reset-password", resetPasswordLimiter, async (req, res) => {
+  const parsed = resetPasswordSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      "Please check the form and try again.",
+      formatZodError(parsed.error),
+    );
+  }
+
+  const { email, code, password } = parsed.data;
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user?.emailVerifiedAt) {
+    throw new HttpError(
+      400,
+      "That code is incorrect. Please try again.",
+      [],
+      "INVALID_CODE",
+    );
+  }
+
+  const result = await checkPasswordResetCode(user.id, code);
+
+  if (result === "expired") {
+    throw new HttpError(
+      400,
+      "That code has expired. Request a new one.",
+      [],
+      "EXPIRED_CODE",
+    );
+  }
+
+  if (result === "too_many_attempts") {
+    throw new HttpError(
+      400,
+      "Too many incorrect attempts. Request a new code.",
+      [],
+      "TOO_MANY_ATTEMPTS",
+    );
+  }
+
+  if (result === "invalid") {
+    throw new HttpError(
+      400,
+      "That code is incorrect. Please try again.",
+      [],
+      "INVALID_CODE",
+    );
+  }
+
+  // Reusing the password they forgot would leave the old credential valid.
+  if (user.passwordHash && (await verifyPassword(user.passwordHash, password))) {
+    throw new HttpError(
+      400,
+      "Choose a password you haven't used here before.",
+      [{ field: "password", message: "Choose a password you haven't used here before." }],
+      "PASSWORD_REUSED",
+    );
+  }
+
+  const passwordHash = await hashPassword(password);
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash },
+  });
+
+  await clearPasswordResetCode(user.id);
+  // Drop every session (including any an attacker may hold) before issuing the
+  // new one, so the reset cannot leave an old login alive.
+  await deleteOtherSessions(user.id);
+  await startSession(req, res, updated);
+
+  res.json({ user: toPublicUser(updated) });
+});
+
+// POST /api/auth/change-password — signed-in password change. Google-only
+// accounts can use it to add a password (no current password to confirm).
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  changePasswordLimiter,
+  async (req, res) => {
+    const parsed = changePasswordSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "Please check the form and try again.",
+        formatZodError(parsed.error),
+      );
+    }
+
+    const { currentPassword, newPassword } = parsed.data;
+    const user = await prisma.user.findUnique({
+      where: { id: currentUserId(req) },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new HttpError(404, "Not found");
+    }
+
+    if (user.passwordHash) {
+      if (!currentPassword) {
+        throw new HttpError(
+          400,
+          "Enter your current password.",
+          [{ field: "currentPassword", message: "Enter your current password." }],
+          "CURRENT_PASSWORD_REQUIRED",
+        );
+      }
+
+      if (!(await verifyPassword(user.passwordHash, currentPassword))) {
+        throw new HttpError(
+          400,
+          "That's not your current password.",
+          [
+            {
+              field: "currentPassword",
+              message: "That's not your current password.",
+            },
+          ],
+          "INVALID_CURRENT_PASSWORD",
+        );
+      }
+
+      if (await verifyPassword(user.passwordHash, newPassword)) {
+        throw new HttpError(
+          400,
+          "Choose a password you haven't used here before.",
+          [
+            {
+              field: "newPassword",
+              message: "Choose a password you haven't used here before.",
+            },
+          ],
+          "PASSWORD_REUSED",
+        );
+      }
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    // Keep this session signed in, but sign out everywhere else.
+    await deleteOtherSessions(user.id, req.auth?.session.id);
+
+    res.json({ user: toPublicUser(updated) });
+  },
+);
+
+// POST /api/auth/logout-other-devices — signs out every session except this one.
+authRouter.post(
+  "/logout-other-devices",
+  requireAuth,
+  async (req, res) => {
+    await deleteOtherSessions(currentUserId(req), req.auth?.session.id);
+    res.status(204).end();
   },
 );
 

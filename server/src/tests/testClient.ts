@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { createApp } from "../app.js";
-import { setEmailSenderForTests, type VerificationEmail } from "../lib/email.js";
+import { setEmailSenderForTests, type SentOtpEmail, type VerificationEmail } from "../lib/email.js";
 import { prisma } from "../lib/prisma.js";
 
 /** Generates a per-run suffix so test data never collides between runs. */
@@ -14,7 +14,7 @@ export function uniqueEmail(label: string, runId: string): string {
 }
 
 // Capture verification emails instead of calling Brevo during tests.
-const sentEmails: VerificationEmail[] = [];
+const sentEmails: SentOtpEmail[] = [];
 setEmailSenderForTests(async (email) => {
   sentEmails.push(email);
 });
@@ -35,10 +35,30 @@ export function lastVerificationCode(email: string): string | undefined {
   return undefined;
 }
 
+/** The most recent password-reset code sent to an address, if any. */
+export function lastPasswordResetCode(email: string): string | undefined {
+  const address = email.trim().toLowerCase();
+  for (let i = sentEmails.length - 1; i >= 0; i -= 1) {
+    const sent = sentEmails[i];
+    if (sent?.to === address && sent.kind === "passwordReset") {
+      return sent.code;
+    }
+  }
+  return undefined;
+}
+
 /** Number of verification emails captured for an address. */
 export function verificationEmailCount(address: string): number {
   const normalised = address.trim().toLowerCase();
   return sentEmails.filter((email) => email.to === normalised).length;
+}
+
+/** Number of password-reset emails captured for an address. */
+export function passwordResetEmailCount(address: string): number {
+  const normalised = address.trim().toLowerCase();
+  return sentEmails.filter(
+    (email) => email.to === normalised && email.kind === "passwordReset",
+  ).length;
 }
 
 /** A minimal cookie-jar HTTP client that also echoes the CSRF cookie. */
@@ -113,6 +133,11 @@ export class TestClient {
 
   get sessionCookie(): string | undefined {
     return this.cookies.get("hd_session");
+  }
+
+  /** Sets a cookie directly, for tests that seed a session in the database. */
+  setCookie(name: string, value: string): void {
+    this.cookies.set(name, value);
   }
 }
 

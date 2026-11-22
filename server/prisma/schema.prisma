@@ -75,6 +75,7 @@ model User {
   sessions           Session[]
   claims             GiftClaim[]
   emailVerifications EmailVerification[]
+  passwordReset      PasswordReset?
   purchases          Purchase[]
 
   @@map("users")
@@ -96,6 +97,25 @@ model EmailVerification {
 
   @@index([expiresAt])
   @@map("email_verifications")
+}
+
+/// The active password-reset OTP for an account. Deliberately separate from
+/// `EmailVerification` so a signup code can never be replayed as a reset code
+/// (and a reset request never invalidates a pending signup code).
+model PasswordReset {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  lastSentAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("password_resets")
 }
 
 /// A server-side session. The raw token lives only in the HTTP-only cookie;

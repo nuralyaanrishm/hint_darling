@@ -127,7 +127,16 @@ async function onSubmit() {
             placeholder="Your password"
             required
             :error="fieldErrors.password"
-          />
+          >
+            <template #labelAction>
+              <RouterLink
+                to="/forgot-password"
+                class="text-xs font-medium text-rose transition-colors hover:text-rose-deep"
+              >
+                Forgot password?
+              </RouterLink>
+            </template>
+          </BaseInput>
 
           <BaseButton type="submit" block :disabled="submitting" class="mt-2">
             {{ submitting ? "Logging in…" : "Log in" }}

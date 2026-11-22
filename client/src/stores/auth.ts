@@ -1,15 +1,19 @@
 import { computed, readonly, ref } from "vue";
 import type { PlanTier } from "@/lib/plans";
 import {
+  changePassword as apiChangePassword,
   getCurrentUser,
   login as apiLogin,
   logout as apiLogout,
   register as apiRegister,
+  resetPassword as apiResetPassword,
   verifyEmail as apiVerifyEmail,
   type AuthUser,
+  type ChangePasswordPayload,
   type LoginPayload,
   type RegisterPayload,
   type RegisterResult,
+  type ResetPasswordPayload,
   type VerifyEmailPayload,
 } from "@/lib/api";
 
@@ -77,6 +81,24 @@ async function verifyEmail(payload: VerifyEmailPayload): Promise<AuthUser> {
   return verified;
 }
 
+/** Redeems a reset code; the server signs the user in and returns them. */
+async function resetPassword(payload: ResetPasswordPayload): Promise<AuthUser> {
+  const reset = await apiResetPassword(payload);
+  user.value = reset;
+  initialized.value = true;
+  return reset;
+}
+
+/** Changes the signed-in account's password (or sets the first one). */
+async function changePassword(
+  payload: ChangePasswordPayload,
+): Promise<AuthUser> {
+  const updated = await apiChangePassword(payload);
+  user.value = updated;
+  initialized.value = true;
+  return updated;
+}
+
 async function logout(): Promise<void> {
   try {
     await apiLogout();
@@ -97,6 +119,8 @@ export function useAuth() {
     login,
     register,
     verifyEmail,
+    resetPassword,
+    changePassword,
     logout,
   };
 }

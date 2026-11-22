@@ -5,6 +5,9 @@ import NotFoundView from "@/views/NotFoundView.vue";
 import LoginView from "@/views/LoginView.vue";
 import RegisterView from "@/views/RegisterView.vue";
 import VerifyEmailView from "@/views/VerifyEmailView.vue";
+import ForgotPasswordView from "@/views/ForgotPasswordView.vue";
+import ResetPasswordView from "@/views/ResetPasswordView.vue";
+import AccountView from "@/views/AccountView.vue";
 import DashboardView from "@/views/DashboardView.vue";
 import EventFormView from "@/views/EventFormView.vue";
 import EventDetailView from "@/views/EventDetailView.vue";
@@ -66,6 +69,34 @@ const router = createRouter({
       meta: {
         title: "Verify your email",
         guestOnly: true,
+      },
+    },
+    {
+      path: "/forgot-password",
+      name: "forgot-password",
+      component: ForgotPasswordView,
+      meta: {
+        title: "Reset your password",
+        guestOnly: true,
+      },
+    },
+    {
+      path: "/reset-password",
+      name: "reset-password",
+      component: ResetPasswordView,
+      meta: {
+        title: "Choose a new password",
+        guestOnly: true,
+      },
+    },
+    {
+      path: "/account",
+      name: "account",
+      component: AccountView,
+      meta: {
+        title: "Account",
+        requiresAuth: true,
+        layout: "app",
       },
     },
     {

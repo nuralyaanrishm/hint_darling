@@ -25,6 +25,8 @@ export interface AuthUser {
   email: string;
   plan: PlanTier;
   planUnlockedAt: string | null;
+  /** False for Google-only accounts until they set a password. */
+  hasPassword: boolean;
   /** True when this account's email is on the server's ADMIN_EMAILS allowlist. */
   isAdmin: boolean;
   createdAt: string;
@@ -286,6 +288,56 @@ export async function login(payload: LoginPayload): Promise<AuthUser> {
 
 export async function logout(): Promise<void> {
   await request<void>("/auth/logout", { method: "POST" });
+}
+
+/**
+ * Asks for a password-reset code. Always succeeds generically so the UI cannot
+ * be used to discover which addresses have accounts.
+ */
+export async function forgotPassword(email: string): Promise<void> {
+  await request<{ message: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export interface ResetPasswordPayload {
+  email: string;
+  code: string;
+  password: string;
+}
+
+/** Redeems a reset code and returns the now signed-in user. */
+export async function resetPassword(
+  payload: ResetPasswordPayload,
+): Promise<AuthUser> {
+  const data = await request<{ user: AuthUser }>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.user;
+}
+
+export interface ChangePasswordPayload {
+  /** Omitted when the account has no password yet (Google-only signups). */
+  currentPassword?: string;
+  newPassword: string;
+}
+
+/** Changes (or first sets) the signed-in account's password. */
+export async function changePassword(
+  payload: ChangePasswordPayload,
+): Promise<AuthUser> {
+  const data = await request<{ user: AuthUser }>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.user;
+}
+
+/** Signs out every other device, keeping the current session. */
+export async function logoutOtherDevices(): Promise<void> {
+  await request<void>("/auth/logout-other-devices", { method: "POST" });
 }
 
 export function isApiError(error: unknown): error is ApiError {

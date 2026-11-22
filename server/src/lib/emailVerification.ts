@@ -1,6 +1,12 @@
-import { createHmac, randomInt } from "node:crypto";
+import { generateOtpCode, hashOtpCode } from "./otp.js";
 import { prisma } from "./prisma.js";
 import { safeEqual } from "./tokens.js";
+
+// Kept under their original names so existing callers and tests are unaffected.
+export {
+  generateOtpCode as generateVerificationCode,
+  hashOtpCode as hashVerificationCode,
+};
 
 /** How long a signup code stays valid. */
 export const VERIFICATION_TTL_MS = 10 * 60 * 1000;
@@ -9,36 +15,6 @@ export const MAX_VERIFICATION_ATTEMPTS = 5;
 /** Minimum time between code sends for one account. */
 export const RESEND_COOLDOWN_MS = 60 * 1000;
 export const VERIFICATION_TTL_MINUTES = VERIFICATION_TTL_MS / 60_000;
-
-function otpSecret(): string {
-  const secret = process.env.OTP_SECRET;
-
-  if (secret && secret.length >= 16) {
-    return secret;
-  }
-
-  if (process.env.NODE_ENV === "test") {
-    return "test-only-otp-secret-value";
-  }
-
-  throw new Error(
-    "OTP_SECRET must be set to a random value of at least 16 characters.",
-  );
-}
-
-/** Six random digits, zero-padded (e.g. `004271`). */
-export function generateVerificationCode(): string {
-  return randomInt(0, 1_000_000).toString().padStart(6, "0");
-}
-
-/**
- * HMAC rather than plain SHA-256: a six-digit code has only a million possible
- * values, so a bare digest would be trivial to reverse offline from a database
- * leak. The server-side secret prevents that.
- */
-export function hashVerificationCode(code: string): string {
-  return createHmac("sha256", otpSecret()).update(code).digest("hex");
-}
 
 export interface IssuedVerification {
   /** False when the resend cooldown suppressed a second email. */
@@ -66,19 +42,19 @@ export async function issueVerificationCode(
     return { sent: false, code: null };
   }
 
-  const code = generateVerificationCode();
+  const code = generateOtpCode();
   const now = new Date();
 
   await prisma.emailVerification.upsert({
     where: { userId },
     create: {
       userId,
-      codeHash: hashVerificationCode(code),
+      codeHash: hashOtpCode(code),
       expiresAt: new Date(now.getTime() + VERIFICATION_TTL_MS),
       lastSentAt: now,
     },
     update: {
-      codeHash: hashVerificationCode(code),
+      codeHash: hashOtpCode(code),
       expiresAt: new Date(now.getTime() + VERIFICATION_TTL_MS),
       attempts: 0,
       lastSentAt: now,
@@ -118,7 +94,7 @@ export async function checkVerificationCode(
     return "too_many_attempts";
   }
 
-  if (!safeEqual(hashVerificationCode(code), record.codeHash)) {
+  if (!safeEqual(hashOtpCode(code), record.codeHash)) {
     await prisma.emailVerification.update({
       where: { userId },
       data: { attempts: { increment: 1 } },

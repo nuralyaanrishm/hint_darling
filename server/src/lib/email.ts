@@ -14,14 +14,24 @@ export class EmailDeliveryError extends Error {
   }
 }
 
-export interface VerificationEmail {
+export interface OtpEmail {
   to: string;
   name: string;
   code: string;
   expiresInMinutes: number;
 }
 
-type EmailSender = (email: VerificationEmail) => Promise<void>;
+/** A signup verification email. */
+export type VerificationEmail = OtpEmail;
+/** A password-reset email; identical shape, different copy. */
+export type PasswordResetEmail = OtpEmail;
+
+export type EmailKind = "verification" | "passwordReset";
+
+/** What the sender receives: the email plus which template produced it. */
+export type SentOtpEmail = OtpEmail & { kind: EmailKind };
+
+type EmailSender = (email: SentOtpEmail) => Promise<void>;
 
 interface GmailConfig {
   user: string;
@@ -103,7 +113,36 @@ function gmailConfig(): GmailConfig | null {
   };
 }
 
-function verificationEmailContent(email: VerificationEmail): {
+interface OtpCopy {
+  subject: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  footnote: string;
+  closing: string;
+}
+
+const OTP_COPY: Record<EmailKind, OtpCopy> = {
+  verification: {
+    subject: "Your Hint, Darling verification code",
+    eyebrow: "Verify your email",
+    heading: "Finish creating your account",
+    intro: "use the code below to verify your email address.",
+    footnote: "If you didn't create an account, you can safely ignore this email.",
+    closing: "Enter it to finish creating your account.",
+  },
+  passwordReset: {
+    subject: "Reset your Hint, Darling password",
+    eyebrow: "Reset your password",
+    heading: "Choose a new password",
+    intro: "use the code below to reset the password for your account.",
+    footnote:
+      "If you didn't ask to reset your password, you can safely ignore this email — your password hasn't changed.",
+    closing: "Enter it to choose a new password.",
+  },
+};
+
+function otpEmailContent(email: SentOtpEmail): {
   subject: string;
   htmlContent: string;
   textContent: string;
@@ -111,17 +150,18 @@ function verificationEmailContent(email: VerificationEmail): {
   const name = email.name.trim() || "there";
   const safeName = escapeHtml(name);
   const safeCode = escapeHtml(email.code);
+  const copy = OTP_COPY[email.kind];
 
   return {
-    subject: "Your Hint, Darling verification code",
+    subject: copy.subject,
     textContent: [
       `Hi ${name},`,
       "",
-      `Your verification code is: ${email.code}`,
+      `Your code is: ${email.code}`,
       "",
-      `Enter it to finish creating your account. The code expires in ${email.expiresInMinutes} minutes.`,
+      `${copy.closing} The code expires in ${email.expiresInMinutes} minutes.`,
       "",
-      "If you didn't create an account, you can safely ignore this email.",
+      copy.footnote,
       "",
       "— Hint, Darling",
     ].join("\n"),
@@ -134,14 +174,14 @@ function verificationEmailContent(email: VerificationEmail): {
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border-radius:24px;padding:40px;">
             <tr>
               <td>
-                <p style="margin:0 0 8px;font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#b76e79;">Verify your email</p>
-                <h1 style="margin:0 0 16px;font-size:28px;font-weight:600;color:#2f2a2a;">Finish creating your account</h1>
-                <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#5c5353;">Hi ${safeName}, use the code below to verify your email address.</p>
+                <p style="margin:0 0 8px;font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#b76e79;">${copy.eyebrow}</p>
+                <h1 style="margin:0 0 16px;font-size:28px;font-weight:600;color:#2f2a2a;">${copy.heading}</h1>
+                <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#5c5353;">Hi ${safeName}, ${copy.intro}</p>
                 <div style="margin:0 0 24px;padding:20px;border-radius:16px;background:#fdf7f4;text-align:center;">
                   <span style="font-size:34px;font-weight:700;letter-spacing:0.32em;color:#b76e79;">${safeCode}</span>
                 </div>
                 <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#5c5353;">This code expires in ${email.expiresInMinutes} minutes.</p>
-                <p style="margin:0;font-size:14px;line-height:1.6;color:#5c5353;">If you didn't create an account, you can safely ignore this email.</p>
+                <p style="margin:0;font-size:14px;line-height:1.6;color:#5c5353;">${copy.footnote}</p>
                 <p style="margin:32px 0 0;font-size:14px;color:#2f2a2a;">— Hint, Darling</p>
               </td>
             </tr>
@@ -192,10 +232,10 @@ export function setGmailTransportForTests(next: EmailTransport | null): void {
 }
 
 async function sendViaGmail(
-  email: VerificationEmail,
+  email: SentOtpEmail,
   config: GmailConfig,
 ): Promise<void> {
-  const content = verificationEmailContent(email);
+  const content = otpEmailContent(email);
 
   try {
     await getGmailTransport(config).sendMail({
@@ -212,7 +252,7 @@ async function sendViaGmail(
   }
 }
 
-async function sendViaBrevo(email: VerificationEmail): Promise<void> {
+async function sendViaBrevo(email: SentOtpEmail): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY?.trim();
   const senderEmail = process.env.BREVO_FROM_EMAIL?.trim();
   const senderName = sanitizeHeaderValue(
@@ -223,7 +263,7 @@ async function sendViaBrevo(email: VerificationEmail): Promise<void> {
     throw new EmailDeliveryError("Brevo is not configured");
   }
 
-  const content = verificationEmailContent(email);
+  const content = otpEmailContent(email);
 
   const body = JSON.stringify({
     sender: { name: senderName, email: senderEmail },
@@ -258,7 +298,7 @@ async function sendViaBrevo(email: VerificationEmail): Promise<void> {
 }
 
 /** Uses Gmail SMTP when configured, otherwise falls back to Brevo. */
-async function sendViaConfiguredProvider(email: VerificationEmail): Promise<void> {
+async function sendViaConfiguredProvider(email: SentOtpEmail): Promise<void> {
   const config = gmailConfig();
 
   if (config) {
@@ -279,6 +319,14 @@ export function setEmailSenderForTests(next: EmailSender | null): void {
   sender = next ?? sendViaConfiguredProvider;
 }
 
-export async function sendVerificationEmail(email: VerificationEmail): Promise<void> {
-  await sender(email);
+export async function sendVerificationEmail(
+  email: VerificationEmail,
+): Promise<void> {
+  await sender({ ...email, kind: "verification" });
+}
+
+export async function sendPasswordResetEmail(
+  email: PasswordResetEmail,
+): Promise<void> {
+  await sender({ ...email, kind: "passwordReset" });
 }

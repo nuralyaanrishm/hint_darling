@@ -61,6 +61,43 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 
+/** A six-digit emailed code, accepted as a string or a JSON number. */
+const codeField = z.preprocess(
+  (value) => (typeof value === "number" ? String(value) : value),
+  z
+    .string({ error: "Verification code is required" })
+    .trim()
+    .regex(/^\d{6}$/, "Enter the 6-digit code from your email"),
+);
+
+const newPasswordField = z
+  .string({ error: "Password is required" })
+  .min(8, "Password must be at least 8 characters")
+  .max(200, "Password must be 200 characters or fewer");
+
+export const forgotPasswordSchema = z.object({
+  email: emailField,
+});
+
+export const resetPasswordSchema = z.object({
+  email: emailField,
+  code: codeField,
+  password: newPasswordField,
+});
+
+export const changePasswordSchema = z.object({
+  /** Omitted when the account has no password yet (Google-only signups). */
+  currentPassword: z
+    .string()
+    .max(200, "Password must be 200 characters or fewer")
+    .optional(),
+  newPassword: newPasswordField,
+});
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
 // ---------------------------------------------------------------------------
 // Events and wishlists
 // ---------------------------------------------------------------------------

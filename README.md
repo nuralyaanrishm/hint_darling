@@ -459,7 +459,17 @@ Cookie-based sessions with no tokens in JavaScript.
 - **Validation**: requests are validated server-side with Zod; the API returns
   `{ error: { message, fields } }` for the forms to display.
 - **Rate limiting**: `/api/auth/login`, `/api/auth/register`,
-  `/api/auth/verify-email` and `/api/auth/resend-verification` are throttled.
+  `/api/auth/verify-email`, `/api/auth/resend-verification`,
+  `/api/auth/forgot-password`, `/api/auth/reset-password` and
+  `/api/auth/change-password` are throttled.
+- **Password reset**: a 6-digit code is emailed (same HMAC/OTP_SECRET scheme as
+  signup verification, but stored in its own `password_resets` table so the two
+  flows can never be confused). Redeeming it sets the new password, revokes every
+  existing session and signs the user in. `POST /api/auth/forgot-password` always
+  answers generically, so it cannot be used to discover which addresses exist.
+- **Change password**: requires the current password when the account has one.
+  Google-only accounts can use it to add their first password. Every other
+  session is revoked; the session making the change stays signed in.
 
 ### API endpoints
 
@@ -469,6 +479,10 @@ Cookie-based sessions with no tokens in JavaScript.
 | `POST` | `/api/auth/register`          | Create an unverified account and email a code.    |
 | `POST` | `/api/auth/verify-email`      | Confirm the code, verify the email and sign in.   |
 | `POST` | `/api/auth/resend-verification` | Send a fresh code (always answers generically). |
+| `POST` | `/api/auth/forgot-password`   | Email a reset code (always answers generically).  |
+| `POST` | `/api/auth/reset-password`    | Redeem the code, set the password, sign in.       |
+| `POST` | `/api/auth/change-password`   | Change (or first set) the signed-in password.     |
+| `POST` | `/api/auth/logout-other-devices` | Sign out every session except this one.        |
 | `POST` | `/api/auth/login`             | Sign in and start a session.                      |
 | `GET`  | `/api/auth/google`            | Start Google sign-in (redirects to Google).       |
 | `GET`  | `/api/auth/google/callback`   | Exchange the Google code and start a session.     |

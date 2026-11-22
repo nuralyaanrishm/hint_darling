@@ -87,6 +87,7 @@ export interface ValidSession {
     id: string;
     name: string;
     email: string;
+    passwordHash: string | null;
     createdAt: Date;
     plan: PlanTierName;
     planUnlockedAt: Date | null;
@@ -108,6 +109,7 @@ export async function findValidSession(
           id: true,
           name: true,
           email: true,
+          passwordHash: true,
           createdAt: true,
           plan: true,
           planUnlockedAt: true,
@@ -143,4 +145,21 @@ export async function deleteSession(rawToken: string): Promise<void> {
 
 export async function deleteSessionById(id: string): Promise<void> {
   await prisma.session.deleteMany({ where: { id } }).catch(() => undefined);
+}
+
+/**
+ * Deletes every session for a user except `keepSessionId` (the request making
+ * the change). Used after a password change or reset so any session an attacker
+ * may hold dies with the old password.
+ */
+export async function deleteOtherSessions(
+  userId: string,
+  keepSessionId?: string,
+): Promise<void> {
+  await prisma.session.deleteMany({
+    where: {
+      userId,
+      ...(keepSessionId ? { id: { not: keepSessionId } } : {}),
+    },
+  });
 }
