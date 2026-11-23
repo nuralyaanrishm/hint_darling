@@ -21,7 +21,8 @@ const BUSINESS_ADDRESS = [
 ];
 const BUSINESS_PHONE = "019-6277653";
 const BUSINESS_EMAIL = "buildwithaly@outlook.com";
-const BUSINESS_WEBSITE = "hintdarling.website";
+const FOOTNOTE = "** Hint, Darling is a product of Build With Aly Services **";
+
 
 const CREAM = "#FDF6E9";
 const PINK = "#F5B6D0";
@@ -434,7 +435,7 @@ export async function createReceiptPdf(
     align: "center",
   });
   doc
-    .text(BUSINESS_WEBSITE, 0, footerTop + 80, {
+    .text(FOOTNOTE, 0, footerTop + 80, {
       width: PAGE_WIDTH,
       align: "center",
       underline: true,
