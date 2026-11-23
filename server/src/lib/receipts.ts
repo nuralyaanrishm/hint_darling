@@ -438,7 +438,6 @@ export async function createReceiptPdf(
     .text(FOOTNOTE, 0, footerTop + 80, {
       width: PAGE_WIDTH,
       align: "center",
-      underline: true,
     });
 
   horizontalRule(doc, PAGE_HEIGHT - 42);
