@@ -25,7 +25,6 @@ const BUSINESS_WEBSITE = "hintdarling.website";
 
 const CREAM = "#FDF6E9";
 const PINK = "#F5B6D0";
-const ORANGE = "#F26B57";
 const INK = "#231A1D";
 const LINE = "#3A2E32";
 
@@ -68,13 +67,58 @@ interface PurchaseForReceipt {
   event: { name: string } | null;
 }
 
+function purchaseDate(purchase: { paidAt: Date | null; createdAt: Date }): Date {
+  return purchase.paidAt ?? purchase.createdAt;
+}
+
 /**
- * A short, stable human-readable receipt number. The purchase id is a cuid, so
- * its tail is unique enough to quote to support while staying easy to read.
+ * Assigns sequential, per-year receipt numbers (`HD-YYYY-NN`) across all paid
+ * purchases. A receipt's number is its chronological position within its year,
+ * so numbers stay stable and unique for the business.
  */
-function receiptNumberFor(purchase: { id: string; paidAt: Date | null; createdAt: Date }): string {
-  const year = (purchase.paidAt ?? purchase.createdAt).getUTCFullYear();
-  return `HD-${year}-${purchase.id.slice(-6).toUpperCase()}`;
+async function assignReceiptNumbers(
+  purchases: { id: string; paidAt: Date | null; createdAt: Date }[],
+): Promise<Map<string, string>> {
+  const numbers = new Map<string, string>();
+
+  if (purchases.length === 0) {
+    return numbers;
+  }
+
+  const years = new Set(
+    purchases.map((purchase) => purchaseDate(purchase).getUTCFullYear()),
+  );
+  const yearWindows = [...years].flatMap((year) => {
+    const start = new Date(Date.UTC(year, 0, 1));
+    const end = new Date(Date.UTC(year + 1, 0, 1));
+    return [
+      { paidAt: { gte: start, lt: end } },
+      { paidAt: null, createdAt: { gte: start, lt: end } },
+    ];
+  });
+
+  const paidPurchases = await prisma.purchase.findMany({
+    where: { status: "PAID", OR: yearWindows },
+    select: { id: true, paidAt: true, createdAt: true },
+  });
+
+  paidPurchases.sort((a, b) => {
+    const delta = purchaseDate(a).getTime() - purchaseDate(b).getTime();
+    if (delta !== 0) {
+      return delta;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  const perYearCount = new Map<number, number>();
+  for (const purchase of paidPurchases) {
+    const year = purchaseDate(purchase).getUTCFullYear();
+    const sequence = (perYearCount.get(year) ?? 0) + 1;
+    perYearCount.set(year, sequence);
+    numbers.set(purchase.id, `HD-${year}-${String(sequence).padStart(2, "0")}`);
+  }
+
+  return numbers;
 }
 
 function descriptionFor(
@@ -90,10 +134,13 @@ function descriptionFor(
     : "Hint, Darling Subscription Package - (Event Pass)";
 }
 
-function toSummary(purchase: PurchaseForReceipt): ReceiptSummary {
+function toSummary(
+  purchase: PurchaseForReceipt,
+  receiptNumber: string,
+): ReceiptSummary {
   return {
     id: purchase.id,
-    receiptNumber: receiptNumberFor(purchase),
+    receiptNumber,
     product: purchase.product,
     description: descriptionFor(purchase.product, purchase.event?.name ?? null),
     eventId: purchase.eventId,
@@ -121,7 +168,10 @@ export async function listReceipts(userId: string): Promise<ReceiptSummary[]> {
     },
   });
 
-  return purchases.map((purchase) => toSummary(purchase));
+  const receiptNumbers = await assignReceiptNumbers(purchases);
+  return purchases.map((purchase) =>
+    toSummary(purchase, receiptNumbers.get(purchase.id) ?? ""),
+  );
 }
 
 async function loadReceipt(
@@ -208,8 +258,9 @@ export async function createReceiptPdf(
   receiptId: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
   const purchase = await loadReceipt(userId, receiptId);
-  const receiptNumber = receiptNumberFor(purchase);
   const date = purchase.paidAt ?? purchase.createdAt;
+  const receiptNumbers = await assignReceiptNumbers([purchase]);
+  const receiptNumber = receiptNumbers.get(purchase.id) ?? "";
   const logo = logoPath();
 
   const doc = new PDFDocument({
@@ -258,7 +309,7 @@ export async function createReceiptPdf(
     }
   }
 
-  horizontalRule(doc, 196);
+  horizontalRule(doc, 180);
 
   doc
     .font("Helvetica-Bold")
@@ -266,14 +317,6 @@ export async function createReceiptPdf(
     .fillColor(PINK)
     .text("Receipt", MARGIN, 214);
 
-  doc
-    .font("Helvetica")
-    .fontSize(9.5)
-    .fillColor(ORANGE)
-    .text("date", CONTENT_RIGHT - 220, 236, {
-      width: 220,
-      align: "right",
-    });
   doc
     .font("Helvetica")
     .fontSize(9.5)
@@ -302,12 +345,12 @@ export async function createReceiptPdf(
   doc
     .font("Helvetica")
     .fontSize(11)
-    .fillColor(ORANGE)
+    .fillColor(INK)
     .text(purchase.user.name, MARGIN, 342, { width: 360 });
   doc
     .font("Helvetica")
     .fontSize(11)
-    .fillColor(ORANGE)
+    .fillColor(INK)
     .text(purchase.user.email, MARGIN, 360, { width: 360 });
 
   horizontalRule(doc, 410);
@@ -339,11 +382,11 @@ export async function createReceiptPdf(
     .fontSize(10.5)
     .heightOfString(description, { width: 350 });
 
-  doc.fillColor(ORANGE).text(description, MARGIN, rowY, { width: 350 });
+  doc.fillColor(INK).text(description, MARGIN, rowY, { width: 350 });
   doc
     .font("Helvetica")
     .fontSize(10.5)
-    .fillColor(ORANGE)
+    .fillColor(INK)
     .text(formatAmount(purchase.amountSen), CONTENT_RIGHT - 140, rowY, {
       width: 140,
       align: "right",
@@ -361,7 +404,7 @@ export async function createReceiptPdf(
   doc
     .font("Helvetica-Bold")
     .fontSize(11.5)
-    .fillColor(ORANGE)
+    .fillColor(INK)
     .text(formatAmount(purchase.amountSen), CONTENT_RIGHT - 140, totalY, {
       width: 140,
       align: "right",
