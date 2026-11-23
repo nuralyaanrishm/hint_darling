@@ -41,9 +41,13 @@ const year = new Date().getFullYear();
     </div>
 
     <div class="border-t border-blush/60">
-      <p class="mx-auto max-w-6xl px-5 py-5 text-xs text-ink/45 sm:px-8">
-        © {{ year }} Hint, Darling. Powered by BuildWithAly.
-      </p>
+      <div class="mx-auto max-w-6xl space-y-1 px-5 py-5 text-xs text-ink/45 sm:px-8">
+        <p>© {{ year }} Hint, Darling. All rights reserved.</p>
+        <p>Operated by Build With Aly Services (202603304335 / LA0095301-M)</p>
+        <p>
+          Business Address: 19, Jalan Impian Putra 4/3, Taman Impian Putra, 43000, Selangor, Malaysia
+        </p>
+      </div>
     </div>
   </footer>
 </template>
