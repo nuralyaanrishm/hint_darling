@@ -204,7 +204,7 @@ const router = createRouter({
       component: PlaceholderView,
       meta: {
         title: "Contact",
-        description: "Send us a message at alyaanoris@outlook.com",
+        description: "Send us a message at buildwithaly@outlook.com",
       },
     },
     {
