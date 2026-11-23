@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import PasswordCard from "@/components/account/PasswordCard.vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
+import BaseModal from "@/components/ui/BaseModal.vue";
 import BowDivider from "@/components/decor/BowDivider.vue";
-import { isApiError, logoutOtherDevices } from "@/lib/api";
+import {
+  isApiError,
+  listReceipts,
+  logoutOtherDevices,
+  receiptDownloadUrl,
+  type ReceiptSummary,
+} from "@/lib/api";
 import { PLAN_CATALOG } from "@/lib/plans";
 import { useAuth } from "@/stores/auth";
 
@@ -19,6 +26,43 @@ const memberSince = computed(() => {
     month: "long",
     year: "numeric",
   });
+});
+
+const receipts = ref<ReceiptSummary[]>([]);
+const receiptsOpen = ref(false);
+const receiptsError = ref<string | null>(null);
+
+const singleReceipt = computed(() =>
+  receipts.value.length === 1 ? (receipts.value[0] ?? null) : null,
+);
+
+function formatReceiptDate(receipt: ReceiptSummary): string {
+  const date = receipt.paidAt ?? null;
+  if (!date) return "";
+
+  return new Date(date).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatReceiptAmount(amountSen: number): string {
+  return `RM ${(amountSen / 100).toFixed(2)}`;
+}
+
+async function loadReceipts() {
+  try {
+    receipts.value = await listReceipts();
+  } catch (error) {
+    receiptsError.value = isApiError(error)
+      ? error.message
+      : "We couldn't load your receipts right now.";
+  }
+}
+
+onMounted(() => {
+  void loadReceipts();
 });
 
 const signingOut = ref(false);
@@ -81,13 +125,35 @@ async function onSignOutOtherDevices() {
             <dt class="text-[10px] uppercase tracking-[0.2em] text-ink/45">
               Plan
             </dt>
-            <dd class="mt-1">
+            <dd class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span
                 class="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.18em] text-rose-deep"
               >
                 {{ planLabel }}
               </span>
+              <a
+                v-if="singleReceipt"
+                :href="receiptDownloadUrl(singleReceipt.id)"
+                download
+                class="text-xs font-medium text-rose transition-colors hover:text-rose-deep"
+              >
+                (download receipt)
+              </a>
+              <button
+                v-else-if="receipts.length > 1"
+                type="button"
+                class="text-xs font-medium text-rose transition-colors hover:text-rose-deep"
+                @click="receiptsOpen = true"
+              >
+                (download receipt)
+              </button>
             </dd>
+            <p
+              v-if="receiptsError"
+              class="mt-1 text-[11px] text-rose-deep"
+            >
+              {{ receiptsError }}
+            </p>
           </div>
           <div v-if="memberSince">
             <dt class="text-[10px] uppercase tracking-[0.2em] text-ink/45">
@@ -149,5 +215,40 @@ async function onSignOutOtherDevices() {
         </BaseButton>
       </section>
     </div>
+
+    <BaseModal v-model="receiptsOpen" title="Your receipts" size="sm">
+      <p class="text-sm leading-relaxed text-ink/70">
+        Download a receipt for each payment on your account.
+      </p>
+
+      <ul class="mt-4 divide-y divide-blush/70">
+        <li
+          v-for="receipt in receipts"
+          :key="receipt.id"
+          class="flex items-start justify-between gap-4 py-3"
+        >
+          <div class="min-w-0">
+            <p class="text-sm leading-snug text-ink">
+              {{ receipt.description }}
+            </p>
+            <p class="mt-1 text-xs text-ink/55">
+              {{ formatReceiptDate(receipt) }}
+            </p>
+          </div>
+          <div class="shrink-0 text-right">
+            <p class="text-sm text-ink">
+              {{ formatReceiptAmount(receipt.amountSen) }}
+            </p>
+            <a
+              :href="receiptDownloadUrl(receipt.id)"
+              download
+              class="text-xs font-medium text-rose transition-colors hover:text-rose-deep"
+            >
+              Download PDF
+            </a>
+          </div>
+        </li>
+      </ul>
+    </BaseModal>
   </section>
 </template>

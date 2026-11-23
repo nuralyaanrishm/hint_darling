@@ -62,6 +62,18 @@ export interface BillingSummary {
   currency: string;
 }
 
+export interface ReceiptSummary {
+  id: string;
+  receiptNumber: string;
+  product: BillingProduct;
+  description: string;
+  eventId: string | null;
+  eventName: string | null;
+  amountSen: number;
+  currency: string;
+  paidAt: string | null;
+}
+
 export interface FieldError {
   field: string;
   message: string;
@@ -203,6 +215,19 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 export async function getBilling(): Promise<BillingSummary> {
   const data = await request<{ billing: BillingSummary }>("/billing");
   return data.billing;
+}
+
+/** Every paid receipt belonging to the signed-in account, newest first. */
+export async function listReceipts(): Promise<ReceiptSummary[]> {
+  const data = await request<{ receipts: ReceiptSummary[] }>(
+    "/billing/receipts",
+  );
+  return data.receipts;
+}
+
+/** Same-origin download URL for one receipt PDF. */
+export function receiptDownloadUrl(receiptId: string): string {
+  return `/api/billing/receipts/${encodeURIComponent(receiptId)}`;
 }
 
 /**
